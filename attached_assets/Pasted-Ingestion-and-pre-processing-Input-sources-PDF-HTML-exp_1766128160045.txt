@@ -1,0 +1,95 @@
+Ingestion and pre-processing
+- Input sources: PDF/HTML exports, plain text dumps, or JSON attachments.
+- Text extraction: Use a reliable parser to convert the report to structured text.
+- For PDFs: pdf.js or a server-side extractor to get page-wise text.
+- For HTML: DOM selectors and sanitization.
+- Section detection: Split into logical blocks (Personal, Business, Banking, Networth, Debt, End use, References) using headings/keywords.
+- Implement robust regexes or rule-based splitters with fallbacks for noisy headings.
+
+Parsing and field normalization
+- Define a schema: Create typed interfaces for each section (e.g., PersonalDetails, BusinessDetails).
+- Map fields to schema: For each section, write extractors to pull values into the schema.
+- Example (TypeScript interface):
+interface PersonalDetails {
+  selfEducation?: string;
+  spouseName?: string;
+  spouseEducation?: string;
+  spouseEmployment?: string;
+  kidsMentioned?: boolean;
+  kidsEducation?: string;
+  kidsSchool?: string;
+  residenceVintage?: string;    // e.g., "less than 6 months"
+  monthlyRent?: number;         // null if owned
+  residenceOwnership?: "Owned" | "Rented";
+}
+- Normalize values: Convert raw text to booleans/numbers/enums for scoring.
+- Rules examples:
+- Self education: present if any non-empty education string.
+- Residence vintage: present if matches patterns like “< 6 months”, “6–12 months”, “more than 36 months”.
+- Monthly rent: numeric if parsed; null/0 if owned.
+- Turnover credited percent: convert “60–70%” to a numeric range or “present” boolean.
+- Handle N/A logic: Mark spouse/kids fields as not applicable if “unmarried” is stated; decide whether to exclude from scoring or award comfort points per policy.
+
+Rule-based scoring
+- Fixed rubric per section: Encode weights once, keep them immutable for consistency.
+- Boolean scoring: Award points when normalized fields evaluate to “evidenced”.
+- Numeric thresholds (optional): For items like turnover %, tenure, networth, define bands for partial/full points.
+- Service/manufacturing/trading branches: Only score the relevant sub-block based on “Nature of Business”.
+- Example: if Service, then score service documentation/technology/contracts; skip manufacturing/trading items.
+- Example (TypeScript scoring function):
+type Rubric = Record<string, number>;
+type SectionData = Record<string, unknown>;
+
+function scoreSection(data: SectionData, rubric: Rubric, max: number): number {
+  let score = 0;
+  for (const [key, weight] of Object.entries(rubric)) {
+    const val = data[key];
+    const present =
+      typeof val === "boolean" ? val :
+      typeof val === "number" ? val !== 0 && !Number.isNaN(val) :
+      typeof val === "string" ? val.trim().length > 0 :
+      Array.isArray(val) ? val.length > 0 :
+      !!val;
+
+    if (present) score += weight;
+  }
+  return Math.min(Math.round(score * 100) / 100, max);
+}
+
+
+
+Audit trail and error handling
+- Missing items list: For every section, compute and log which rubric keys were not evidenced.
+- Example:
+function missingItems(data: SectionData, rubric: Rubric): string[] {
+  const missing: string[] = [];
+  for (const key of Object.keys(rubric)) {
+    const val = data[key];
+    const absent =
+      val === undefined ||
+      (typeof val === "boolean" && !val) ||
+      (typeof val === "number" && (val === 0 || Number.isNaN(val))) ||
+      (typeof val === "string" && !val.trim());
+    if (absent) missing.push(key);
+  }
+  return missing;
+}
+- Section-level logs: Store raw extracted values, normalized values, scores, and missing keys for each lead.
+- Confidence flags: If a critical field failed to parse (e.g., banker name, turnover %), mark the section “low confidence” and emit a remediation tip (e.g., “check bank statements”).
+- Graceful fallbacks: If the parser fails on one section, continue scoring others; never crash the pipeline.
+
+Testing and deployment in Replit
+- Unit tests for parsers: Write tests that feed representative report snippets and assert normalized outputs.
+- Fixture library: Maintain sample LIP reports (no PII) covering edge cases: owned vs rented, unmarried, service vs manufacturing, missing banking data.
+- Golden files for scoring: For each fixture, persist expected section scores and diffs. Your CI (or simple test runner) compares current output to golden values for regressions.
+- Endpoint orchestration: Expose REST endpoints to:
+- Ingest report: POST /api/reports → stores raw and parsed JSON.
+- Score report: POST /api/reports/:id/score → returns per-section scores, missing items, and total.
+- Search and allocate: GET /api/reports?leadId=… → pipelines into MIS allocation.
+
+Optional enhancements
+- Label-driven parsing: Use consistent anchors in the report (“Applicant Name :”, “Nature of Business”) to reduce regex brittleness.
+- Attachment parsing: For “Income Assessment” PDFs or images, queue OCR only if core fields are missing.
+- Banking enrichment: If the report mentions banks and % routing, cross-check with actual bank statements ingestion (SBI/Axis) for reconciliation.
+- Scoring dashboards: Generate a compact JSON and a banker-style summary with per-section findings and mitigants for credit committee review.
+If you want, share a small raw snippet you’re parsing today, and I’ll turn it into a concrete extractor and normalization function you can drop into your Replit project.

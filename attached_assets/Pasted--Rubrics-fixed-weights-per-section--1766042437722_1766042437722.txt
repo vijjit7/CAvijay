@@ -1,0 +1,240 @@
+# ---------------------------------------
+# Rubrics: fixed weights per section
+# ---------------------------------------
+
+personal_rubric = {
+    "self_education": 1.5,
+    "spouse_name": 1.5,
+    "spouse_education": 1.5,
+    "spouse_employment": 1.5,
+    "mention_about_kids": 1.5,
+    "kids_education": 1.5,
+    "kids_school": 1.5,
+    "residence_vintage": 1.5,
+    "monthly_rent_if_rented": 1.5,
+    "residence_owned_or_rented": 1.5,
+}  # max 15
+
+business_rubric = {
+    # Core profile
+    "business_name": 2,
+    "nature_of_business": 2,
+    "existence_current_place": 2,
+    "licenses_registrations": 2,
+    "promoter_experience_qualifications": 2,
+    "strategic_vision_clarity": 2,
+    "employees_seen": 2,
+    "monthly_turnover": 2,
+    "client_list_concentration_risk": 2,
+    "activity_during_visit": 2,
+    "monthly_income": 2,
+    "seasonality": 2,
+    "infra_supports_turnover": 2,
+    # Manufacturing block (score only if applicable)
+    "mfg_raw_material_sourcing_storage": 1,
+    "mfg_process_flow": 1,
+    "mfg_capacity_vs_utilization": 1,
+    "mfg_machinery_make_automation_maintenance": 1,
+    "mfg_inventory_fifo_aging": 1,
+    "mfg_quality_control": 1,
+    # Trading block (score only if applicable)
+    "trading_product_range_inventory_movement": 1,
+    "trading_purchase_sales_cycle": 1,
+    "trading_warehouse_stock_seen": 1,
+    # Service block (score only if applicable)
+    "svc_documentation_of_delivery": 1,
+    "svc_technology_systems": 1,
+    "svc_client_list_contracts_revenue_model": 1,
+    "svc_contract_based_or_walkin": 1,
+}  # max 30
+
+banking_rubric = {
+    "primary_banker_name": 3,                # you noted "10" but section total is 15; use 3 per item
+    "turnover_credited_percent": 3,
+    "banking_tenure": 3,
+    "emis_routed_bank": 3,
+    "qr_code_spotted": 3,
+}  # max 15
+
+networth_rubric = {
+    "properties_owned": 2,
+    "vehicles_owned": 2,
+    "other_investments": 2,
+    "business_place_owned": 2,
+    "total_networth_available": 2,
+}  # max 10
+
+existing_debt_rubric = {
+    "has_existing_loans": 2,                 # if False, you can award 2 for "no outstanding debt"
+    "loan_list_available": 2,
+    "can_service_new_loan": 2,
+    "repayment_history_quality": 2,
+    "loans_source_bank_nature": 2,
+}  # max 10
+
+end_use_rubric = {
+    # Home Loan path
+    "agreement_value_available": 2,
+    "advance_paid_cash_or_bank_amount": 2,
+    "will_occupy_post_purchase": 2,
+    # Mortgage/LAP path
+    "mortgage_funds_use": 2,
+    "additional_use_information": 2,
+}  # max 10
+
+reference_checks_rubric = {
+    "personal_ref_neighbours": 3.4,          # split to sum 10
+    "business_ref_buyers_sellers": 3.3,
+    "invoice_verification": 3.3,
+}  # max 10
+
+
+# ---------------------------------------
+# Stage 1: Normalize parsed report fields
+# Replace the dummy data with real parsed values
+# ---------------------------------------
+
+personal_details = {
+    "self_education": True,
+    "spouse_name": False,                   # False if unmarried or not provided
+    "spouse_education": False,
+    "spouse_employment": False,
+    "mention_about_kids": False,
+    "kids_education": False,
+    "kids_school": False,
+    "residence_vintage": True,              # True if a concrete vintage is captured
+    "monthly_rent_if_rented": True,         # True if rent amount captured
+    "residence_owned_or_rented": True,      # True if ownership/rent status captured
+}
+
+business_details = {
+    "business_name": True,
+    "nature_of_business": True,
+    "existence_current_place": True,
+    "licenses_registrations": True,
+    "promoter_experience_qualifications": True,
+    "strategic_vision_clarity": True,
+    "employees_seen": False,
+    "monthly_turnover": True,
+    "client_list_concentration_risk": False,
+    "activity_during_visit": True,
+    "monthly_income": True,
+    "seasonality": True,
+    "infra_supports_turnover": True,
+    # Manufacturing (set True only if applicable and observed)
+    "mfg_raw_material_sourcing_storage": False,
+    "mfg_process_flow": False,
+    "mfg_capacity_vs_utilization": False,
+    "mfg_machinery_make_automation_maintenance": False,
+    "mfg_inventory_fifo_aging": False,
+    "mfg_quality_control": False,
+    # Trading
+    "trading_product_range_inventory_movement": False,
+    "trading_purchase_sales_cycle": False,
+    "trading_warehouse_stock_seen": False,
+    # Service
+    "svc_documentation_of_delivery": True,
+    "svc_technology_systems": True,
+    "svc_client_list_contracts_revenue_model": True,
+    "svc_contract_based_or_walkin": True,
+}
+
+banking_details = {
+    "primary_banker_name": True,
+    "turnover_credited_percent": True,      # True if % captured (e.g., 60–70%)
+    "banking_tenure": True,                 # True if tenure captured (e.g., 10 years)
+    "emis_routed_bank": True,               # True if routing info captured or "no EMIs"
+    "qr_code_spotted": False,
+}
+
+networth_details = {
+    "properties_owned": True,
+    "vehicles_owned": False,
+    "other_investments": False,
+    "business_place_owned": False,
+    "total_networth_available": True,       # True if an aggregate networth figure is presented
+}
+
+existing_debt_details = {
+    "has_existing_loans": False,            # False means no loans; still award points if policy grants comfort
+    "loan_list_available": False,
+    "can_service_new_loan": True,
+    "repayment_history_quality": True,      # True if good or none (no EMIs)
+    "loans_source_bank_nature": False,
+}
+
+end_use_details = {
+    "agreement_value_available": True,
+    "advance_paid_cash_or_bank_amount": True,
+    "will_occupy_post_purchase": True,
+    "mortgage_funds_use": True,
+    "additional_use_information": False,
+}
+
+reference_checks_details = {
+    "personal_ref_neighbours": True,
+    "business_ref_buyers_sellers": True,
+    "invoice_verification": False,
+}
+
+
+# ---------------------------------------
+# Stage 2: Scoring function and report
+# ---------------------------------------
+
+def score_section(data: dict, rubric: dict, max_score: float) -> float:
+    score = 0.0
+    for key, weight in rubric.items():
+        val = data.get(key, False)
+        if isinstance(val, bool):
+            if val:
+                score += weight
+        elif isinstance(val, (int, float)):
+            # If numeric values are used, consider any positive numeric as present
+            if val is not None and val != 0:
+                score += weight
+        elif isinstance(val, str):
+            if val.strip():
+                score += weight
+    return round(min(score, max_score), 2)
+
+
+def missing_items(data: dict, rubric: dict) -> list:
+    """Return list of keys not satisfied to aid audit commentary."""
+    missing = []
+    for key in rubric.keys():
+        val = data.get(key, False)
+        if isinstance(val, bool):
+            if not val:
+                missing.append(key)
+        elif isinstance(val, (int, float)):
+            if val == 0 or val is None:
+                missing.append(key)
+        elif isinstance(val, str):
+            if not val.strip():
+                missing.append(key)
+        else:
+            missing.append(key)
+    return missing
+
+
+sections = [
+    ("Personal Details", personal_details, personal_rubric, 15),
+    ("Business Details", business_details, business_rubric, 30),
+    ("Banking", banking_details, banking_rubric, 15),
+    ("Networth", networth_details, networth_rubric, 10),
+    ("Existing Debt", existing_debt_details, existing_debt_rubric, 10),
+    ("End Use", end_use_details, end_use_rubric, 10),
+    ("Reference Checks", reference_checks_details, reference_checks_rubric, 10),
+]
+
+# Compute and print scores
+for title, data, rubric, max_pts in sections:
+    score = score_section(data, rubric, max_pts)
+    print(f"{title}: {score} / {max_pts}")
+    # Optional: audit commentary
+    gaps = missing_items(data, rubric)
+    if gaps:
+        print(f"  Missing/Not evidenced ({len(gaps)}): {', '.join(gaps)}")
+    else:
+        print("  All criteria evidenced.")
