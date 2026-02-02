@@ -966,6 +966,20 @@ export async function registerRoutes(
       if (req.session) {
         req.session.userId = user.id;
         req.session.username = user.username;
+        
+        // Explicitly save session to ensure it's persisted before response
+        return new Promise<void>((resolve, reject) => {
+          req.session.save((err) => {
+            if (err) {
+              console.error("Session save error:", err);
+              res.status(500).json({ error: "Failed to save session" });
+              return reject(err);
+            }
+            console.log("Session saved successfully for user:", user.id);
+            res.json(userWithoutPassword);
+            resolve();
+          });
+        });
       }
       
       return res.json(userWithoutPassword);
