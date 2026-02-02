@@ -53,9 +53,14 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
-// Health check endpoint for Replit deployments
+// Health check endpoints - MUST be before any routes that depend on database
+// These work even if database connection fails
 app.get("/_health", (_req, res) => {
   res.status(200).json({ status: "ok", version: SERVER_VERSION });
+});
+
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok", version: SERVER_VERSION, time: new Date().toISOString() });
 });
 
 export function log(message: string, source = "express") {

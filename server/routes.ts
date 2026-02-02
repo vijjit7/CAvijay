@@ -18,8 +18,9 @@ import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
 import { searchLeadIdInMIS, parseFlexibleDate } from "./sheets";
 import exifr from "exifr";
-import { db } from "./db";
-import { sql } from "drizzle-orm";
+// NOTE: db is imported lazily in handlers to avoid crash if DATABASE_URL not set
+// import { db } from "./db";
+// import { sql } from "drizzle-orm";
 
 const DEFAULT_USERS = [
   { id: 'ADMIN', username: 'admin', password: 'password123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
@@ -35,6 +36,7 @@ async function ensureUsersExist() {
   try {
     // Always try to insert default users, using onConflictDoNothing to skip existing ones
     console.log('Ensuring all default users exist...');
+    const { db } = await import("./db");
     await db.insert(users).values(DEFAULT_USERS).onConflictDoNothing();
     console.log('Default users check complete');
   } catch (error) {
@@ -487,10 +489,7 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Ultra-simple health check - no async, no database, no middleware
-  app.get("/api/health", (req, res) => {
-    res.status(200).json({ status: "ok", time: new Date().toISOString() });
-  });
+  // Health check endpoint is now in index.ts to ensure it works even if DB fails
 
   // Test fetching a few reports to debug production issues
   app.get("/api/debug/reports-sample", async (req, res) => {
@@ -646,6 +645,8 @@ export async function registerRoutes(
       let dbConnected = false;
       let dbError = null;
       try {
+        const { db } = await import("./db");
+        const { sql } = await import("drizzle-orm");
         const result = await db.execute(sql`SELECT 1 as test`);
         dbConnected = true;
       } catch (err) {
