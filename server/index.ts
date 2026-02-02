@@ -7,7 +7,7 @@ import { createServer } from "http";
 import { pool } from "./db";
 
 // Server version for debugging deployments
-const SERVER_VERSION = "V5_20260202";
+const SERVER_VERSION = "V6_20260202_SESSION";
 console.log(`[SERVER] Starting AuditGuard ${SERVER_VERSION} in ${process.env.NODE_ENV || 'development'} mode`);
 
 const app = express();
