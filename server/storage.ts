@@ -1,6 +1,17 @@
 import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, users, reports, misEntries, archiveStats } from "@shared/schema";
-import { requireDb } from "./db";
+import { requireDb, db } from "./db";
 import { eq, and, sql, desc } from "drizzle-orm";
+
+// Fallback users for local development when database is not available
+const DEFAULT_USERS: User[] = [
+  { id: 'ADMIN', username: 'admin', password: 'password123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
+  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
+  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
+  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
+  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80' },
+  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80' },
+  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' }
+];
 
 export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -53,19 +64,43 @@ export interface IStorage {
   getTotalMisEntriesCount(): Promise<number>;
 }
 
+// In-memory storage for local development (when DATABASE_URL is not set)
+const inMemoryReports: Report[] = [];
+const inMemoryMisEntries: MisEntry[] = [];
+
 export class PostgresStorage implements IStorage {
   private get db() {
     return requireDb();
   }
 
+  private get hasDatabase() {
+    return db !== null;
+  }
+
   async getUserByUsername(username: string): Promise<User | undefined> {
+    // Fallback to in-memory users when database is not available
+    if (!this.hasDatabase) {
+      return DEFAULT_USERS.find(u => u.username.toLowerCase() === username.toLowerCase());
+    }
     const result = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
     return result[0];
   }
 
   async getUserById(id: string): Promise<User | undefined> {
+    // Fallback to in-memory users when database is not available
+    if (!this.hasDatabase) {
+      return DEFAULT_USERS.find(u => u.id === id);
+    }
     const result = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
+  }
+
+  async getAssociates(): Promise<User[]> {
+    // Fallback to in-memory users when database is not available
+    if (!this.hasDatabase) {
+      return DEFAULT_USERS.filter(u => u.id !== 'ADMIN');
+    }
+    return await this.db.select().from(users).where(sql`${users.id} != 'ADMIN'`);
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -79,6 +114,19 @@ export class PostgresStorage implements IStorage {
   }
 
   async createReport(insertReport: InsertReport & { id: string }): Promise<Report> {
+    // Fallback to in-memory storage when database is not available
+    if (!this.hasDatabase) {
+      const report: Report = {
+        ...insertReport,
+        createdAt: new Date(),
+        tat: insertReport.tat || null,
+        scores: insertReport.scores || null,
+        tatDelayReason: insertReport.tatDelayReason || null,
+        tatDelayRemark: insertReport.tatDelayRemark || null,
+      };
+      inMemoryReports.push(report);
+      return report;
+    }
     const result = await this.db.insert(reports).values(insertReport).returning();
     return result[0];
   }
@@ -91,6 +139,23 @@ export class PostgresStorage implements IStorage {
     limit?: number;
     offset?: number;
   }): Promise<Report[]> {
+    // Fallback to in-memory storage when database is not available
+    if (!this.hasDatabase) {
+      let filtered = [...inMemoryReports];
+      if (filters?.associateId) {
+        filtered = filtered.filter(r => r.associateId === filters.associateId);
+      }
+      if (filters?.status) {
+        filtered = filtered.filter(r => r.status === filters.status);
+      }
+      if (filters?.month && filters?.year) {
+        const datePrefix = `${filters.year}-${filters.month.padStart(2, '0')}`;
+        filtered = filtered.filter(r => r.date?.startsWith(datePrefix));
+      }
+      const limit = filters?.limit || 100;
+      const offset = filters?.offset || 0;
+      return filtered.slice(offset, offset + limit);
+    }
     const conditions = [];
     
     if (filters?.associateId) {
@@ -160,10 +225,6 @@ export class PostgresStorage implements IStorage {
     return result[0];
   }
 
-  async getAssociates(): Promise<User[]> {
-    return await this.db.select().from(users).where(sql`${users.id} != 'ADMIN'`);
-  }
-
   async getDashboardStats(month?: string, year?: string): Promise<{
     totalReports: number;
     avgScore: number;
@@ -228,23 +289,84 @@ export class PostgresStorage implements IStorage {
 
   // MIS methods - centralized MIS for all associates
   async getMisEntries(associateId?: string): Promise<MisEntry[]> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      return [...inMemoryMisEntries].sort((a, b) => (b.sno || 0) - (a.sno || 0));
+    }
     // Return all entries (centralized MIS)
     return await this.db.select().from(misEntries)
       .orderBy(desc(misEntries.sno));
   }
 
   async createMisEntry(entry: InsertMisEntry): Promise<MisEntry> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      const nextId = inMemoryMisEntries.length + 1;
+      const misEntry: MisEntry = {
+        id: nextId,
+        sno: entry.sno || nextId,
+        leadId: entry.leadId,
+        customerName: entry.customerName,
+        product: entry.product || null,
+        businessName: entry.businessName || null,
+        entityType: entry.entityType || null,
+        branch: entry.branch || null,
+        initiationDate: entry.initiationDate || null,
+        mobileNumber: entry.mobileNumber || null,
+        address: entry.address || null,
+        associateId: entry.associateId || null,
+        status: entry.status || 'pending',
+        createdAt: new Date(),
+      };
+      inMemoryMisEntries.push(misEntry);
+      return misEntry;
+    }
     const result = await this.db.insert(misEntries).values(entry).returning();
     return result[0];
   }
 
   async createMisEntriesBulk(entries: InsertMisEntry[]): Promise<MisEntry[]> {
     if (entries.length === 0) return [];
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      const results: MisEntry[] = [];
+      for (const entry of entries) {
+        const nextId = inMemoryMisEntries.length + 1;
+        const misEntry: MisEntry = {
+          id: nextId,
+          sno: entry.sno || nextId,
+          leadId: entry.leadId,
+          customerName: entry.customerName,
+          product: entry.product || null,
+          businessName: entry.businessName || null,
+          entityType: entry.entityType || null,
+          branch: entry.branch || null,
+          initiationDate: entry.initiationDate || null,
+          mobileNumber: entry.mobileNumber || null,
+          address: entry.address || null,
+          associateId: entry.associateId || null,
+          status: entry.status || 'pending',
+          createdAt: new Date(),
+        };
+        inMemoryMisEntries.push(misEntry);
+        results.push(misEntry);
+      }
+      return results;
+    }
     const result = await this.db.insert(misEntries).values(entries).returning();
     return result;
   }
 
   async updateMisEntry(id: number, entry: Partial<InsertMisEntry>): Promise<MisEntry | undefined> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      const idx = inMemoryMisEntries.findIndex(e => e.id === id);
+      if (idx !== -1) {
+        inMemoryMisEntries[idx] = { ...inMemoryMisEntries[idx], ...entry };
+        return inMemoryMisEntries[idx];
+      }
+      return undefined;
+    }
     const result = await this.db.update(misEntries)
       .set(entry)
       .where(eq(misEntries.id, id))
@@ -258,6 +380,11 @@ export class PostgresStorage implements IStorage {
   }
 
   async getNextMisSno(associateId?: string): Promise<number> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      const maxSno = inMemoryMisEntries.reduce((max, e) => Math.max(max, e.sno || 0), 0);
+      return maxSno + 1;
+    }
     // Global SNO across all entries (centralized MIS)
     const result = await this.db.select({ maxSno: sql<number>`COALESCE(MAX(${misEntries.sno}), 0)` })
       .from(misEntries);
@@ -265,6 +392,10 @@ export class PostgresStorage implements IStorage {
   }
   
   async getMisEntryByLeadId(leadId: string): Promise<MisEntry | undefined> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      return inMemoryMisEntries.find(e => e.leadId === leadId);
+    }
     const result = await this.db.select().from(misEntries)
       .where(eq(misEntries.leadId, leadId))
       .limit(1);
@@ -272,6 +403,10 @@ export class PostgresStorage implements IStorage {
   }
 
   async getMisEntryByLeadIdAndCustomerName(leadId: string, customerName: string): Promise<MisEntry | undefined> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      return inMemoryMisEntries.find(e => e.leadId === leadId && e.customerName === customerName);
+    }
     const result = await this.db.select().from(misEntries)
       .where(and(eq(misEntries.leadId, leadId), eq(misEntries.customerName, customerName)))
       .limit(1);
@@ -279,6 +414,10 @@ export class PostgresStorage implements IStorage {
   }
 
   async getReportByLeadIdAndTitle(leadId: string, title: string): Promise<Report | undefined> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      return inMemoryReports.find(r => r.leadId === leadId && r.title === title);
+    }
     const result = await this.db.select().from(reports)
       .where(and(eq(reports.leadId, leadId), eq(reports.title, title)))
       .limit(1);

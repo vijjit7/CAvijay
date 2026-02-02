@@ -1,17 +1,20 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { pool } from "./db";
 
 // Server version for debugging deployments
-const SERVER_VERSION = "V4_20251217";
+const SERVER_VERSION = "V5_20260202";
 console.log(`[SERVER] Starting AuditGuard ${SERVER_VERSION} in ${process.env.NODE_ENV || 'development'} mode`);
 
 const app = express();
 const httpServer = createServer(app);
 
-// Trust proxy for production (Replit's infrastructure)
+// Trust proxy for production (Railway/Replit infrastructure)
+// Must be set before session middleware for secure cookies to work behind reverse proxy
 if (process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
@@ -25,11 +28,29 @@ declare module "http" {
 declare module "express-session" {
   interface SessionData {
     userId: string;
+    username: string;
   }
+}
+
+// Configure session store - use PostgreSQL in production if available, otherwise memory
+const PgSession = connectPgSimple(session);
+const sessionStore = pool 
+  ? new PgSession({
+      pool: pool,
+      tableName: 'session',
+      createTableIfMissing: true,
+    })
+  : undefined;
+
+if (pool) {
+  console.log('[SERVER] Using PostgreSQL session store');
+} else {
+  console.log('[SERVER] Using in-memory session store (not recommended for production)');
 }
 
 app.use(
   session({
+    store: sessionStore,
     secret: process.env.SESSION_SECRET || "auditguard-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
