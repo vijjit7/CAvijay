@@ -1,5 +1,5 @@
 import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, users, reports, misEntries, archiveStats } from "@shared/schema";
-import { db } from "./db";
+import { requireDb } from "./db";
 import { eq, and, sql, desc } from "drizzle-orm";
 
 export interface IStorage {
@@ -54,28 +54,32 @@ export interface IStorage {
 }
 
 export class PostgresStorage implements IStorage {
+  private get db() {
+    return requireDb();
+  }
+
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    const result = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
     return result[0];
   }
 
   async getUserById(id: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    const result = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
   }
 
   async createUser(user: InsertUser): Promise<User> {
-    const result = await db.insert(users).values(user).returning();
+    const result = await this.db.insert(users).values(user).returning();
     return result[0];
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    const result = await db.delete(users).where(eq(users.id, id));
+    const result = await this.db.delete(users).where(eq(users.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
   async createReport(insertReport: InsertReport & { id: string }): Promise<Report> {
-    const result = await db.insert(reports).values(insertReport).returning();
+    const result = await this.db.insert(reports).values(insertReport).returning();
     return result[0];
   }
 
@@ -109,31 +113,31 @@ export class PostgresStorage implements IStorage {
     const offset = filters?.offset || 0;
     
     if (conditions.length === 0) {
-      return await db.select().from(reports).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
+      return await this.db.select().from(reports).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
     }
     
-    return await db.select().from(reports).where(and(...conditions)).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
+    return await this.db.select().from(reports).where(and(...conditions)).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
   }
 
   async getReportById(id: string): Promise<Report | undefined> {
-    const result = await db.select().from(reports).where(eq(reports.id, id)).limit(1);
+    const result = await this.db.select().from(reports).where(eq(reports.id, id)).limit(1);
     return result[0];
   }
 
   async getReportByLeadIdAndDate(leadId: string, date: string): Promise<Report | undefined> {
-    const result = await db.select().from(reports)
+    const result = await this.db.select().from(reports)
       .where(and(eq(reports.leadId, leadId), eq(reports.date, date)))
       .limit(1);
     return result[0];
   }
 
   async deleteReport(id: string): Promise<boolean> {
-    const result = await db.delete(reports).where(eq(reports.id, id));
+    const result = await this.db.delete(reports).where(eq(reports.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
   async updateReportTAT(id: string, tat: any): Promise<Report | undefined> {
-    const result = await db.update(reports)
+    const result = await this.db.update(reports)
       .set({ tat })
       .where(eq(reports.id, id))
       .returning();
@@ -141,7 +145,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateReportTATDelay(id: string, reason: string | null, remark: string | null): Promise<Report | undefined> {
-    const result = await db.update(reports)
+    const result = await this.db.update(reports)
       .set({ tatDelayReason: reason, tatDelayRemark: remark })
       .where(eq(reports.id, id))
       .returning();
@@ -149,7 +153,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateReportScores(id: string, scores: any): Promise<Report | undefined> {
-    const result = await db.update(reports)
+    const result = await this.db.update(reports)
       .set({ scores })
       .where(eq(reports.id, id))
       .returning();
@@ -157,7 +161,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async getAssociates(): Promise<User[]> {
-    return await db.select().from(users).where(sql`${users.id} != 'ADMIN'`);
+    return await this.db.select().from(users).where(sql`${users.id} != 'ADMIN'`);
   }
 
   async getDashboardStats(month?: string, year?: string): Promise<{
@@ -181,8 +185,8 @@ export class PostgresStorage implements IStorage {
     }
     
     const filteredReports = conditions.length > 0
-      ? await db.select().from(reports).where(and(...conditions))
-      : await db.select().from(reports);
+      ? await this.db.select().from(reports).where(and(...conditions))
+      : await this.db.select().from(reports);
     
     const allUsers = await this.getAssociates();
     
@@ -225,23 +229,23 @@ export class PostgresStorage implements IStorage {
   // MIS methods - centralized MIS for all associates
   async getMisEntries(associateId?: string): Promise<MisEntry[]> {
     // Return all entries (centralized MIS)
-    return await db.select().from(misEntries)
+    return await this.db.select().from(misEntries)
       .orderBy(desc(misEntries.sno));
   }
 
   async createMisEntry(entry: InsertMisEntry): Promise<MisEntry> {
-    const result = await db.insert(misEntries).values(entry).returning();
+    const result = await this.db.insert(misEntries).values(entry).returning();
     return result[0];
   }
 
   async createMisEntriesBulk(entries: InsertMisEntry[]): Promise<MisEntry[]> {
     if (entries.length === 0) return [];
-    const result = await db.insert(misEntries).values(entries).returning();
+    const result = await this.db.insert(misEntries).values(entries).returning();
     return result;
   }
 
   async updateMisEntry(id: number, entry: Partial<InsertMisEntry>): Promise<MisEntry | undefined> {
-    const result = await db.update(misEntries)
+    const result = await this.db.update(misEntries)
       .set(entry)
       .where(eq(misEntries.id, id))
       .returning();
@@ -249,33 +253,33 @@ export class PostgresStorage implements IStorage {
   }
 
   async deleteMisEntry(id: number): Promise<boolean> {
-    const result = await db.delete(misEntries).where(eq(misEntries.id, id));
+    const result = await this.db.delete(misEntries).where(eq(misEntries.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
   async getNextMisSno(associateId?: string): Promise<number> {
     // Global SNO across all entries (centralized MIS)
-    const result = await db.select({ maxSno: sql<number>`COALESCE(MAX(${misEntries.sno}), 0)` })
+    const result = await this.db.select({ maxSno: sql<number>`COALESCE(MAX(${misEntries.sno}), 0)` })
       .from(misEntries);
     return (result[0]?.maxSno ?? 0) + 1;
   }
   
   async getMisEntryByLeadId(leadId: string): Promise<MisEntry | undefined> {
-    const result = await db.select().from(misEntries)
+    const result = await this.db.select().from(misEntries)
       .where(eq(misEntries.leadId, leadId))
       .limit(1);
     return result[0];
   }
 
   async getMisEntryByLeadIdAndCustomerName(leadId: string, customerName: string): Promise<MisEntry | undefined> {
-    const result = await db.select().from(misEntries)
+    const result = await this.db.select().from(misEntries)
       .where(and(eq(misEntries.leadId, leadId), eq(misEntries.customerName, customerName)))
       .limit(1);
     return result[0];
   }
 
   async getReportByLeadIdAndTitle(leadId: string, title: string): Promise<Report | undefined> {
-    const result = await db.select().from(reports)
+    const result = await this.db.select().from(reports)
       .where(and(eq(reports.leadId, leadId), eq(reports.title, title)))
       .limit(1);
     return result[0];
@@ -283,17 +287,17 @@ export class PostgresStorage implements IStorage {
 
   // Archive stats methods
   async createArchiveStats(stats: InsertArchiveStats): Promise<ArchiveStats> {
-    const result = await db.insert(archiveStats).values(stats).returning();
+    const result = await this.db.insert(archiveStats).values(stats).returning();
     return result[0];
   }
 
   async getArchiveStats(): Promise<ArchiveStats[]> {
-    return await db.select().from(archiveStats).orderBy(sql`${archiveStats.createdAt} DESC`);
+    return await this.db.select().from(archiveStats).orderBy(sql`${archiveStats.createdAt} DESC`);
   }
 
   async getAllReportsForArchive(): Promise<Report[]> {
     // Get ALL reports without pagination for archiving
-    return await db.select().from(reports).orderBy(sql`${reports.createdAt} DESC`);
+    return await this.db.select().from(reports).orderBy(sql`${reports.createdAt} DESC`);
   }
 
   async getReportsByDateRange(fromDate?: string, toDate?: string): Promise<Report[]> {
@@ -315,22 +319,22 @@ export class PostgresStorage implements IStorage {
   }
 
   async deleteAllReports(): Promise<number> {
-    const result = await db.delete(reports);
+    const result = await this.db.delete(reports);
     return result.rowCount ?? 0;
   }
 
   async deleteAllMisEntries(): Promise<number> {
-    const result = await db.delete(misEntries);
+    const result = await this.db.delete(misEntries);
     return result.rowCount ?? 0;
   }
 
   async getTotalReportsCount(): Promise<number> {
-    const result = await db.execute(sql`SELECT COUNT(*) as count FROM reports`);
+    const result = await this.db.execute(sql`SELECT COUNT(*) as count FROM reports`);
     return parseInt((result.rows?.[0] as any)?.count || '0', 10);
   }
 
   async getTotalMisEntriesCount(): Promise<number> {
-    const result = await db.execute(sql`SELECT COUNT(*) as count FROM mis_entries`);
+    const result = await this.db.execute(sql`SELECT COUNT(*) as count FROM mis_entries`);
     return parseInt((result.rows?.[0] as any)?.count || '0', 10);
   }
 }
