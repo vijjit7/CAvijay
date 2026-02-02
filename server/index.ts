@@ -34,16 +34,23 @@ declare module "express-session" {
 
 // Configure session store - use PostgreSQL in production if available, otherwise memory
 const PgSession = connectPgSimple(session);
-const sessionStore = pool 
-  ? new PgSession({
+let sessionStore: InstanceType<typeof PgSession> | undefined = undefined;
+
+if (pool) {
+  try {
+    sessionStore = new PgSession({
       pool: pool,
       tableName: 'session',
       createTableIfMissing: true,
-    })
-  : undefined;
-
-if (pool) {
-  console.log('[SERVER] Using PostgreSQL session store');
+      errorLog: (err) => {
+        console.error('[Session Store Error]', err);
+      },
+    });
+    console.log('[SERVER] Using PostgreSQL session store');
+  } catch (err) {
+    console.error('[SERVER] Failed to create PostgreSQL session store:', err);
+    console.log('[SERVER] Falling back to in-memory session store');
+  }
 } else {
   console.log('[SERVER] Using in-memory session store (not recommended for production)');
 }

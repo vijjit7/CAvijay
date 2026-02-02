@@ -553,6 +553,25 @@ export async function registerRoutes(
 
   // Ensure default users exist on startup (works for both dev and production)
   await ensureUsersExist();
+  
+  // Ensure session table exists for connect-pg-simple
+  try {
+    const { db } = await import("./db");
+    if (db) {
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS "session" (
+          "sid" varchar NOT NULL COLLATE "default",
+          "sess" json NOT NULL,
+          "expire" timestamp(6) NOT NULL,
+          CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
+        );
+        CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+      `);
+      console.log('[SERVER] Session table ensured');
+    }
+  } catch (error) {
+    console.error('[SERVER] Failed to create session table:', error);
+  }
 
   // Debug endpoint to check database status - minimal version to avoid middleware issues
   app.get("/api/debug/db-status", async (req, res) => {
