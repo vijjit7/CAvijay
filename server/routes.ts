@@ -1984,9 +1984,17 @@ showpage
       console.log(`Generating draft report for ${leadId} with ${audioFile ? 1 : 0} audio files and ${photoFiles.length} photos`);
 
       const OpenAI = (await import("openai")).default;
+      const apiKey = process.env.OPENROUTER_API_KEY || process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
+      const baseURL = process.env.OPENROUTER_BASE_URL || process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+      
+      if (!apiKey) {
+        console.error("Generate draft report error: No OpenRouter API key configured");
+        return res.status(500).json({ error: "AI service not configured. Please set OPENROUTER_API_KEY in environment variables." });
+      }
+      
       const openai = new OpenAI({
-        baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-        apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY
+        baseURL,
+        apiKey
       });
 
       // Build context from uploaded files
