@@ -957,7 +957,8 @@ export async function registerRoutes(
           { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
           { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80' },
           { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80' },
-          { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' }
+          { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' },
+          { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&q=80' }
         ];
         user = DEFAULT_USERS.find(u => u.username.toLowerCase() === normalizedUsername);
       }
