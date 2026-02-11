@@ -87,6 +87,14 @@ export const ASSOCIATES: Associate[] = [
     avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80',
     totalReports: 65,
     avgScore: 85
+  },
+  {
+    id: 'A7',
+    name: 'Nikhil',
+    role: 'Verification Officer',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&q=80',
+    totalReports: 0,
+    avgScore: 0
   }
 ];
 

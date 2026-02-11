@@ -7,7 +7,7 @@ import { createServer } from "http";
 import { pool } from "./db";
 
 // Server version for debugging deployments
-const SERVER_VERSION = "V6_20260202_SESSION";
+const SERVER_VERSION = "V7_20260211_LISTEN_FIRST";
 console.log(`[SERVER] Starting AuditGuard ${SERVER_VERSION} in ${process.env.NODE_ENV || 'development'} mode`);
 
 const app = express();
@@ -129,6 +129,25 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  // IMPORTANT: Start listening FIRST before any blocking database operations
+  // so that health checks can respond even if DB is slow/down
+  const port = parseInt(process.env.PORT || "5000", 10);
+  httpServer.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+    },
+  );
+
+  // Register routes (may have some async DB operations that should not block startup)
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -149,19 +168,5 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  log(`Application fully initialized`);
 })();
