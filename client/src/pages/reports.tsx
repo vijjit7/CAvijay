@@ -469,8 +469,7 @@ export default function ReportsPage() {
                     </TableCell>
                     <TableCell className="font-medium">
                       <div className="space-y-1">
-                        <div className="font-semibold text-slate-900">{report.title}</div>
-                        <div className="text-xs text-slate-500 font-mono">{report.leadId || report.id}_{format(new Date(report.date), 'ddMMyy')}</div>
+                        <div className="font-semibold text-slate-900 font-mono">{report.leadId || report.id}_{format(new Date(report.date), 'ddMMyy')}</div>
                         {report.createdAt && (
                           <div className="text-[10px] text-slate-400 flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
