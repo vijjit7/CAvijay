@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Search, Filter, ArrowRightLeft, Calendar, Info, AlertCircle, CheckCircle, Camera, ShieldCheck, Activity, Image as ImageIcon, AlertTriangle, Scale, BrainCircuit, Clock, Timer, Trash2, Download, RefreshCw, FileText, Edit } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog";
@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function ReportsPage() {
-  const { reports, associates, deleteReport } = useAudit();
+  const { reports, associates, deleteReport, refreshReports } = useAudit();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
@@ -231,6 +231,11 @@ export default function ReportsPage() {
       setRescoringId(null);
     }
   };
+
+  // Refresh reports when the reports page mounts to ensure fresh data
+  useEffect(() => {
+    refreshReports();
+  }, []);
 
   // Debug: Log to help diagnose production issues
   console.log('[REPORTS PAGE] Total reports loaded:', reports.length);

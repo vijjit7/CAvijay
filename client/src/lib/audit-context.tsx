@@ -22,6 +22,17 @@ export function AuditProvider({ children }: { children: ReactNode }) {
     loadInitialData();
   }, []);
 
+  // Retry loading reports if initial load failed (e.g., due to production DB timeout)
+  useEffect(() => {
+    if (!loading && reports.length === 0) {
+      const retryTimer = setTimeout(() => {
+        console.log('[AuditContext] Retrying reports load...');
+        refreshReports();
+      }, 3000);
+      return () => clearTimeout(retryTimer);
+    }
+  }, [loading, reports.length]);
+
   const loadInitialData = async () => {
     try {
       await Promise.all([

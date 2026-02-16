@@ -178,11 +178,32 @@ export class PostgresStorage implements IStorage {
     const limit = filters?.limit || 100;
     const offset = filters?.offset || 0;
     
+    // Select all columns EXCEPT pdfContent to avoid fetching huge base64 data
+    // pdfContent can be multiple MB per report and causes timeouts when fetching lists
+    const selectColumns = {
+      id: reports.id,
+      associateId: reports.associateId,
+      leadId: reports.leadId,
+      title: reports.title,
+      date: reports.date,
+      status: reports.status,
+      metrics: reports.metrics,
+      scores: reports.scores,
+      decision: reports.decision,
+      remarks: reports.remarks,
+      summary: reports.summary,
+      tat: reports.tat,
+      tatDelayReason: reports.tatDelayReason,
+      tatDelayRemark: reports.tatDelayRemark,
+      fileSize: reports.fileSize,
+      createdAt: reports.createdAt,
+    };
+    
     if (conditions.length === 0) {
-      return await this.db.select().from(reports).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
+      return await this.db.select(selectColumns).from(reports).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset) as Report[];
     }
     
-    return await this.db.select().from(reports).where(and(...conditions)).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset);
+    return await this.db.select(selectColumns).from(reports).where(and(...conditions)).orderBy(sql`${reports.createdAt} DESC`).limit(limit).offset(offset) as Report[];
   }
 
   async getReportById(id: string): Promise<Report | undefined> {
@@ -246,9 +267,17 @@ export class PostgresStorage implements IStorage {
       conditions.push(sql`${reports.date} LIKE ${datePrefix + '%'}`);
     }
     
+    // Only select columns needed for dashboard stats (exclude pdfContent for performance)
+    const dashboardColumns = {
+      id: reports.id,
+      associateId: reports.associateId,
+      date: reports.date,
+      scores: reports.scores,
+    };
+    
     const filteredReports = conditions.length > 0
-      ? await this.db.select().from(reports).where(and(...conditions))
-      : await this.db.select().from(reports);
+      ? await this.db.select(dashboardColumns).from(reports).where(and(...conditions))
+      : await this.db.select(dashboardColumns).from(reports);
     
     const allUsers = await this.getAssociates();
     

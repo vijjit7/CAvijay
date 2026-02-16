@@ -2793,38 +2793,35 @@ showpage
       
       // Add pagination - if month is specified, allow more reports; otherwise limit for safety
       const hasMonthFilter = month && typeof month === 'string';
-      const defaultLimit = hasMonthFilter ? 1000 : 300; // Higher limit when month is filtered
+      const defaultLimit = hasMonthFilter ? 1000 : 1000; // Increased limit now that pdfContent is excluded from query
       const limit = limitStr ? parseInt(limitStr as string, 10) : defaultLimit;
       const offset = offsetStr ? parseInt(offsetStr as string, 10) : 0;
-      filters.limit = Math.min(limit, 1000); // Cap at 1000
+      filters.limit = Math.min(limit, 2000); // Cap at 2000
       filters.offset = offset;
       
-      console.log('[REPORTS-API-V4] Fetching reports with filters:', filters);
-      console.log('[REPORTS-API-V4] Environment:', process.env.NODE_ENV || 'unknown');
-      console.log('[REPORTS-API-V4] Database URL present:', !!process.env.DATABASE_URL);
+      console.log('[REPORTS-API-V5] Fetching reports with filters:', filters);
+      console.log('[REPORTS-API-V5] Environment:', process.env.NODE_ENV || 'unknown');
+      console.log('[REPORTS-API-V5] Database URL present:', !!process.env.DATABASE_URL);
       
       let reports;
       try {
         reports = await storage.getReports(filters);
-        console.log('[REPORTS-API-V4] Successfully fetched', reports?.length || 0, 'reports from database');
+        console.log('[REPORTS-API-V5] Successfully fetched', reports?.length || 0, 'reports from database');
       } catch (dbError) {
-        console.error('[REPORTS-API-V4] Database error fetching reports:', dbError);
-        console.error('[REPORTS-API-V4] Full error:', JSON.stringify(dbError, Object.getOwnPropertyNames(dbError)));
+        console.error('[REPORTS-API-V5] Database error fetching reports:', dbError);
+        console.error('[REPORTS-API-V5] Full error:', JSON.stringify(dbError, Object.getOwnPropertyNames(dbError)));
         return res.status(500).json({ 
           error: "Database error fetching reports",
-          version: "V4",
+          version: "V5",
           details: dbError instanceof Error ? dbError.message : 'Unknown database error'
         });
       }
       
-      console.log('[REPORTS-API-V4] Found reports count:', reports.length);
+      console.log('[REPORTS-API-V5] Found reports count:', reports.length);
       
-      // Strip pdfContent from response to reduce payload size and avoid serialization issues
-      // This is a large base64 string that clients don't need for list view
-      const strippedReports = reports.map(r => {
-        const { pdfContent, ...rest } = r as any;
-        return rest;
-      });
+      // pdfContent is already excluded from the query in storage.getReports()
+      // No need to strip it from the response anymore
+      const strippedReports = reports as any[];
       
       // If simple mode, return reports without any enrichment for debugging
       if (simple === 'true') {
