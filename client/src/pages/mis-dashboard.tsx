@@ -614,43 +614,64 @@ export default function MisDashboardPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs">Date</TableHead>
+                          <TableHead className="text-xs min-w-[70px]">Date</TableHead>
                           {loginData.inProcessByDate.map(item => (
-                            <TableHead key={item.date} className="text-center text-xs px-2">{item.date}</TableHead>
+                            <TableHead key={item.date} className="text-center text-xs px-2 min-w-[80px]">{item.date}</TableHead>
                           ))}
+                          <TableHead className="text-center text-xs px-2 min-w-[60px] font-bold bg-slate-50">Total</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         <TableRow>
                           <TableCell className="font-medium text-xs">Pending</TableCell>
-                          <TooltipProvider>
+                          <TooltipProvider delayDuration={100}>
                             {loginData.inProcessByDate.map(item => (
-                              <TableCell key={item.date} className="text-center px-2">
+                              <TableCell key={item.date} className="text-center px-2 align-top">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span className="cursor-pointer text-amber-600 font-medium hover:underline">
-                                      {item.count}
-                                    </span>
+                                    <div className="cursor-pointer group">
+                                      <div className="text-amber-600 font-bold text-base group-hover:text-amber-800 transition-colors">
+                                        {item.count}
+                                      </div>
+                                      <div className="mt-1 space-y-0.5">
+                                        {item.associates.map(assoc => (
+                                          <div key={assoc.name} className="text-[10px] leading-tight text-slate-500 group-hover:text-slate-700 transition-colors">
+                                            <span className="font-medium text-slate-700">{assoc.name}</span>
+                                            <span className="text-amber-600 ml-0.5">({assoc.count})</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </TooltipTrigger>
-                                  <TooltipContent className="bg-slate-800 text-white p-2">
+                                  <TooltipContent side="bottom" className="bg-slate-800 text-white p-3 max-w-[220px]">
                                     <div className="text-xs space-y-1">
-                                      <div className="font-medium border-b border-slate-600 pb-1 mb-1">Associates:</div>
-                                      {item.associates.map(assoc => (
-                                        <div key={assoc.name} className="flex justify-between gap-4">
-                                          <span>{assoc.name}</span>
-                                          <span className="font-medium">{assoc.count}</span>
-                                        </div>
-                                      ))}
+                                      <div className="font-semibold border-b border-slate-600 pb-1 mb-1.5 text-amber-300">
+                                        {item.date} — {item.count} Pending
+                                      </div>
+                                      {item.associates
+                                        .sort((a, b) => b.count - a.count)
+                                        .map(assoc => (
+                                          <div key={assoc.name} className="flex justify-between gap-4 items-center">
+                                            <span className="text-slate-200">{assoc.name}</span>
+                                            <span className="font-bold text-amber-300 bg-slate-700 px-1.5 py-0.5 rounded text-[11px]">
+                                              {assoc.count}
+                                            </span>
+                                          </div>
+                                        ))}
                                     </div>
                                   </TooltipContent>
                                 </Tooltip>
                               </TableCell>
                             ))}
                           </TooltipProvider>
+                          <TableCell className="text-center px-2 align-top bg-slate-50">
+                            <div className="text-red-600 font-bold text-base">{loginData.inProcess}</div>
+                          </TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5 italic">Hover over any date cell to see associate-wise pending breakdown</p>
                 </div>
               )}
             </div>
