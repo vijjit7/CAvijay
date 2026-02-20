@@ -3774,6 +3774,11 @@ showpage
         updates.assignedAt = null;
       }
       
+      // Auto-remove from intray when status is Completed or Cancelled
+      if (updates.status === 'Completed' || updates.status === 'Cancelled') {
+        updates.workflowStatus = 'completed';
+      }
+      
       const result = await storage.updateMisEntry(id, updates);
       if (!result) {
         return res.status(404).json({ error: "MIS entry not found" });

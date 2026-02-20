@@ -448,9 +448,12 @@ export default function MisPage() {
   };
 
   // Get entries assigned to current user for Intray
+  // Exclude completed and cancelled entries so they don't appear in the intray
   const intrayEntries = misEntries.filter(entry => 
     entry.pdPersonId === user?.id && 
-    entry.workflowStatus === "assigned"
+    entry.workflowStatus === "assigned" &&
+    entry.status !== "Completed" &&
+    entry.status !== "Cancelled"
   );
 
   // Extract unique values for each filterable column
@@ -1421,7 +1424,14 @@ export default function MisPage() {
                   <label className="text-sm font-medium">Status</label>
                   <Select
                     value={editEntry.status || "Pending"}
-                    onValueChange={(value) => setEditEntry({ ...editEntry, status: value })}
+                    onValueChange={(value) => {
+                      const updatedEntry = { ...editEntry, status: value };
+                      // Auto-remove from intray when completed or cancelled
+                      if (value === "Completed" || value === "Cancelled") {
+                        updatedEntry.workflowStatus = "completed";
+                      }
+                      setEditEntry(updatedEntry);
+                    }}
                   >
                     <SelectTrigger data-testid="select-edit-status">
                       <SelectValue />

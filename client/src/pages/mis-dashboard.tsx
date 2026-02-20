@@ -191,11 +191,16 @@ export default function MisDashboardPage() {
   const loginData = useMemo(() => {
     const total = filteredMisEntries.length;
     const completed = filteredMisEntries.filter(e => 
-      e.outDate && e.outDate.trim() !== ""
+      (e.outDate && e.outDate.trim() !== "") ||
+      e.status === "Completed" ||
+      e.status === "Cancelled" ||
+      e.workflowStatus === "completed"
     ).length;
-    const inProcessEntries = filteredMisEntries.filter(e => 
-      !e.outDate || e.outDate.trim() === ""
-    );
+    const inProcessEntries = filteredMisEntries.filter(e => {
+      // Exclude completed/cancelled entries from in-process
+      if (e.status === "Completed" || e.status === "Cancelled" || e.workflowStatus === "completed") return false;
+      return !e.outDate || e.outDate.trim() === "";
+    });
     const inProcess = inProcessEntries.length;
     
     // Group in-process entries by date with associate breakdown
@@ -290,11 +295,27 @@ export default function MisDashboardPage() {
       associateMap.set(report.associateId, current);
     });
     
-    // Count in-process cases from MIS entries (assigned but not completed)
+    // Count MIS entries marked as Completed/Cancelled (without uploaded report) as casesDone
+    const completedMisLeadIds = new Set(filteredReports.map(r => r.leadId));
+    filteredMisEntries.forEach(entry => {
+      if (!entry.pdPersonId) return;
+      const isCompletedOrCancelled = entry.status === "Completed" || entry.status === "Cancelled" || entry.workflowStatus === "completed";
+      // Only count if there's no report already counted for this associate+lead combo
+      if (isCompletedOrCancelled && !completedMisLeadIds.has(entry.leadId)) {
+        const current = associateMap.get(entry.pdPersonId) || { cases: 0, inProcess1Day: 0, inProcess2Days: 0, inProcess3Plus: 0, totalTat: 0, tatCount: 0, totalScore: 0, scoreCount: 0 };
+        current.cases++;
+        associateMap.set(entry.pdPersonId, current);
+      }
+    });
+
+    // Count in-process cases from MIS entries (assigned but not completed/cancelled)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
     filteredMisEntries.forEach(entry => {
+      // Exclude completed and cancelled entries from in-process counts
+      if (entry.status === "Completed" || entry.status === "Cancelled" || entry.workflowStatus === "completed") return;
+      
       const isInProcess = entry.status === "In Progress" || entry.status === "Pending" || 
         entry.workflowStatus === "assigned" || entry.workflowStatus === "in_progress" || 
         entry.workflowStatus === "unassigned";
@@ -348,10 +369,12 @@ export default function MisDashboardPage() {
       const current = dayStatusMap.get(dateKey) || { total: 0, completed: 0, inProcess: 0 };
       current.total++;
       
-      const isCompleted = entry.status === "Completed" || entry.status === "Approved" || entry.workflowStatus === "completed";
-      const isInProcess = entry.status === "In Progress" || entry.status === "Pending" || 
+      const isCompleted = entry.status === "Completed" || entry.status === "Approved" || entry.status === "Cancelled" || entry.workflowStatus === "completed";
+      const isInProcess = !isCompleted && (
+        entry.status === "In Progress" || entry.status === "Pending" || 
         entry.workflowStatus === "assigned" || entry.workflowStatus === "in_progress" || 
-        entry.workflowStatus === "unassigned";
+        entry.workflowStatus === "unassigned"
+      );
       
       if (isCompleted) {
         current.completed++;
