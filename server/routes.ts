@@ -642,14 +642,38 @@ export async function registerRoutes(
 
   // Helper to mark MIS entries as completed when a report is uploaded
   // reportDate: Use the actual report date as the out date (for TAT calculation)
+  // Format a date to DD/MM/YYYY for consistent MIS date display
+  function formatDateToDDMMYYYY(dateStr?: string): string {
+    if (dateStr) {
+      // Try parsing various formats
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+      }
+      // DD/MM/YYYY already?
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr.trim())) {
+        return dateStr.trim();
+      }
+    }
+    // Default to today
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
   async function markMisEntryCompleted(leadId: string | null | undefined, reportDate?: string): Promise<void> {
     if (!leadId || leadId.trim() === '') return;
     try {
       const normalizedLeadId = leadId.trim();
       const misEntry = await storage.getMisEntryByLeadId(normalizedLeadId);
       if (misEntry && misEntry.workflowStatus !== 'completed') {
-        // Use the report date if provided, otherwise use today's date
-        const outDate = reportDate || new Date().toISOString().split('T')[0];
+        // Use the report date if provided, otherwise use today's date - always DD/MM/YYYY
+        const outDate = formatDateToDDMMYYYY(reportDate);
         await storage.updateMisEntry(misEntry.id, {
           status: 'Completed',
           workflowStatus: 'completed',

@@ -31,16 +31,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Upload, Trash2, Edit, ClipboardPaste, ExternalLink, Inbox, ChevronDown, Download } from "lucide-react";
+import { Plus, Upload, Trash2, Edit, ClipboardPaste, ExternalLink, Inbox, ChevronDown, Download, CalendarIcon } from "lucide-react";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { format, parse, isValid } from "date-fns";
 
 type MisEntry = {
   id: number;
@@ -543,6 +545,56 @@ export default function MisPage() {
     }
   };
 
+  // Parse any date string (DD/MM/YYYY, DD-Mon-YYYY, YYYY-MM-DD, etc.) into a Date object
+  const parseMisDate = (dateStr: string | null): Date | null => {
+    if (!dateStr) return null;
+    const trimmed = dateStr.trim();
+    
+    // DD/MM/YYYY or DD-MM-YYYY
+    const ddmmyyyyMatch = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+    if (ddmmyyyyMatch) {
+      const [_, day, month, year] = ddmmyyyyMatch;
+      const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      if (!isNaN(d.getTime())) return d;
+    }
+    
+    // DD-Mon-YYYY (e.g., 18-Feb-2026)
+    const ddmonyyyy = trimmed.match(/^(\d{1,2})[-\/]([A-Za-z]{3,})[-\/](\d{4})/);
+    if (ddmonyyyy) {
+      const [_, day, monthStr, year] = ddmonyyyy;
+      const months: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+      const monthNum = months[monthStr.toLowerCase().substring(0, 3)];
+      if (monthNum !== undefined) {
+        return new Date(parseInt(year), monthNum, parseInt(day));
+      }
+    }
+    
+    // YYYY-MM-DD
+    const yyyymmdd = trimmed.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (yyyymmdd) {
+      const [_, year, month, day] = yyyymmdd;
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    }
+    
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) return parsed;
+    
+    return null;
+  };
+
+  // Format any date string to uniform DD/MM/YYYY
+  const formatMisDate = (dateStr: string | null): string => {
+    if (!dateStr || dateStr.trim() === "") return "-";
+    const d = parseMisDate(dateStr);
+    if (!d) return dateStr; // Return original if unparseable
+    return format(d, "dd/MM/yyyy");
+  };
+
+  // Convert Date object to DD/MM/YYYY string for storage
+  const dateToStorageFormat = (date: Date): string => {
+    return format(date, "dd/MM/yyyy");
+  };
+
   const monthNameToNumberMap: { [key: string]: string } = {
     "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
     "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"
@@ -662,8 +714,8 @@ export default function MisPage() {
         `"${entry.contactDetails || ""}"`,
         `"${(entry.customerAddress || "").replace(/"/g, '""')}"`,
         `"${entry.location || ""}"`,
-        `"${entry.inDate || ""}"`,
-        `"${entry.outDate || ""}"`,
+        `"${formatMisDate(entry.inDate) === "-" ? "" : formatMisDate(entry.inDate)}"`,
+        `"${formatMisDate(entry.outDate) === "-" ? "" : formatMisDate(entry.outDate)}"`,
         `"${(entry as any).workNature || ""}"`,
         `"${entry.initiatedPerson || ""}"`,
         `"${getAssociateName(entry.pdPersonId)}"`,
@@ -847,12 +899,36 @@ export default function MisPage() {
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">In Date</label>
-                    <Input
-                      placeholder="DD/MM/YYYY"
-                      value={manualEntry.inDate}
-                      onChange={(e) => setManualEntry({ ...manualEntry, inDate: e.target.value })}
-                      data-testid="input-manual-indate"
-                    />
+                    <div className="flex items-center gap-1">
+                      <Input
+                        placeholder="DD/MM/YYYY"
+                        value={manualEntry.inDate}
+                        readOnly
+                        data-testid="input-manual-indate"
+                      />
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="icon" className="shrink-0" data-testid="calendar-manual-indate">
+                            <CalendarIcon className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={manualEntry.inDate ? parseMisDate(manualEntry.inDate) || undefined : undefined}
+                            onSelect={(date) => {
+                              if (date) {
+                                setManualEntry({ ...manualEntry, inDate: dateToStorageFormat(date) });
+                              }
+                            }}
+                            defaultMonth={new Date()}
+                            captionLayout="dropdown"
+                            startMonth={new Date(2025, 0)}
+                            endMonth={new Date(2035, 11)}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">Product</label>
@@ -1109,7 +1185,7 @@ export default function MisPage() {
                                 {uniqueValues.inDate.map(value => (
                                   <label key={value} className="flex items-center gap-2 p-1 hover:bg-slate-100 rounded cursor-pointer text-xs">
                                     <Checkbox checked={filterInDate.includes(value)} onCheckedChange={() => toggleFilter(filterInDate, value, setFilterInDate)} />
-                                    <span className="truncate">{value}</span>
+                                    <span className="truncate">{formatMisDate(value)}</span>
                                   </label>
                                 ))}
                               </div>
@@ -1136,7 +1212,7 @@ export default function MisPage() {
                                 {uniqueValues.outDate.map(value => (
                                   <label key={value} className="flex items-center gap-2 p-1 hover:bg-slate-100 rounded cursor-pointer text-xs">
                                     <Checkbox checked={filterOutDate.includes(value)} onCheckedChange={() => toggleFilter(filterOutDate, value, setFilterOutDate)} />
-                                    <span className="truncate">{value}</span>
+                                    <span className="truncate">{value === "(Blanks)" ? value : formatMisDate(value)}</span>
                                   </label>
                                 ))}
                               </div>
@@ -1267,8 +1343,8 @@ export default function MisPage() {
                           <div className="line-clamp-2">{entry.customerAddress || "-"}</div>
                         </TableCell>
                         <TableCell className="text-xs px-2">{entry.location || "-"}</TableCell>
-                        <TableCell className="text-xs px-2 whitespace-nowrap">{entry.inDate || "-"}</TableCell>
-                        <TableCell className="text-xs px-2 whitespace-nowrap">{entry.outDate || "-"}</TableCell>
+                        <TableCell className="text-xs px-2 whitespace-nowrap">{formatMisDate(entry.inDate)}</TableCell>
+                        <TableCell className="text-xs px-2 whitespace-nowrap">{formatMisDate(entry.outDate)}</TableCell>
                         <TableCell className="text-xs px-2">{(entry as any).workNature || "-"}</TableCell>
                         <TableCell className="text-xs px-2 text-slate-600">{entry.initiatedPerson || "-"}</TableCell>
                         <TableCell className="text-xs px-2 text-slate-600">{getAssociateName(entry.pdPersonId)}</TableCell>
@@ -1354,19 +1430,82 @@ export default function MisPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium">In Date</label>
-                  <Input
-                    value={editEntry.inDate || ""}
-                    onChange={(e) => setEditEntry({ ...editEntry, inDate: e.target.value })}
-                    data-testid="input-edit-inDate"
-                  />
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={editEntry.inDate ? formatMisDate(editEntry.inDate) : ""}
+                      readOnly
+                      placeholder="Select date"
+                      className="flex-1"
+                      data-testid="input-edit-inDate"
+                    />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="icon" className="shrink-0" data-testid="calendar-edit-inDate">
+                          <CalendarIcon className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={parseMisDate(editEntry.inDate) || undefined}
+                          onSelect={(date) => {
+                            if (date) {
+                              setEditEntry({ ...editEntry, inDate: dateToStorageFormat(date) });
+                            }
+                          }}
+                          defaultMonth={parseMisDate(editEntry.inDate) || new Date()}
+                          captionLayout="dropdown"
+                          startMonth={new Date(2025, 0)}
+                          endMonth={new Date(2035, 11)}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium">Out Date</label>
-                  <Input
-                    value={editEntry.outDate || ""}
-                    onChange={(e) => setEditEntry({ ...editEntry, outDate: e.target.value })}
-                    data-testid="input-edit-outDate"
-                  />
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={editEntry.outDate ? formatMisDate(editEntry.outDate) : ""}
+                      readOnly
+                      placeholder="Select date"
+                      className="flex-1"
+                      data-testid="input-edit-outDate"
+                    />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="icon" className="shrink-0" data-testid="calendar-edit-outDate">
+                          <CalendarIcon className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={parseMisDate(editEntry.outDate) || undefined}
+                          onSelect={(date) => {
+                            if (date) {
+                              setEditEntry({ ...editEntry, outDate: dateToStorageFormat(date) });
+                            }
+                          }}
+                          defaultMonth={parseMisDate(editEntry.outDate) || new Date()}
+                          captionLayout="dropdown"
+                          startMonth={new Date(2025, 0)}
+                          endMonth={new Date(2035, 11)}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    {editEntry.outDate && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 h-8 w-8 text-red-500"
+                        onClick={() => setEditEntry({ ...editEntry, outDate: null })}
+                        title="Clear out date"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium">Initiated Person</label>

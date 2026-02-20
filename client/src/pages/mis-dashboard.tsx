@@ -203,6 +203,14 @@ export default function MisDashboardPage() {
     });
     const inProcess = inProcessEntries.length;
     
+    // Build a map from leadId to the most recent report's associateId
+    // This reflects the actual current assignment (updated MIS data) rather than initial allocation
+    const reportAssociateMap = new Map<string, string>();
+    reports.forEach(report => {
+      // Later entries in the array overwrite earlier ones, so the latest report assignment wins
+      reportAssociateMap.set(report.leadId, report.associateId);
+    });
+
     // Group in-process entries by date with associate breakdown
     const dateWiseData = new Map<string, { count: number; associates: Map<string, number> }>();
     
@@ -214,7 +222,8 @@ export default function MisDashboardPage() {
       const current = dateWiseData.get(dateKey) || { count: 0, associates: new Map() };
       current.count++;
       
-      const associateId = entry.pdPersonId || "Unassigned";
+      // Use report's associateId (actual current worker) if available, else fall back to MIS pdPersonId
+      const associateId = reportAssociateMap.get(entry.leadId) || entry.pdPersonId || "Unassigned";
       const associateName = associates.find(a => a.id === associateId)?.name || associateId;
       current.associates.set(associateName, (current.associates.get(associateName) || 0) + 1);
       
@@ -236,7 +245,7 @@ export default function MisDashboardPage() {
       });
     
     return { total, completed, inProcess, inProcessByDate };
-  }, [filteredMisEntries, associates]);
+  }, [filteredMisEntries, associates, reports]);
 
   const tatData = useMemo(() => {
     const getTatHours = (r: Report) => r.tat?.totalTATHours ?? r.tat?.totalHours ?? null;
@@ -309,6 +318,12 @@ export default function MisDashboardPage() {
     });
 
     // Count in-process cases from MIS entries (assigned but not completed/cancelled)
+    // Build a map from leadId to report's associateId for updated assignment info
+    const inProcessReportMap = new Map<string, string>();
+    reports.forEach(report => {
+      inProcessReportMap.set(report.leadId, report.associateId);
+    });
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -320,8 +335,11 @@ export default function MisDashboardPage() {
         entry.workflowStatus === "assigned" || entry.workflowStatus === "in_progress" || 
         entry.workflowStatus === "unassigned";
       
-      if (isInProcess && entry.pdPersonId) {
-        const current = associateMap.get(entry.pdPersonId) || { cases: 0, inProcess1Day: 0, inProcess2Days: 0, inProcess3Plus: 0, totalTat: 0, tatCount: 0, totalScore: 0, scoreCount: 0 };
+      // Use report's associateId (actual current worker) if available, else fall back to MIS pdPersonId
+      const effectiveAssociateId = inProcessReportMap.get(entry.leadId) || entry.pdPersonId;
+      
+      if (isInProcess && effectiveAssociateId) {
+        const current = associateMap.get(effectiveAssociateId) || { cases: 0, inProcess1Day: 0, inProcess2Days: 0, inProcess3Plus: 0, totalTat: 0, tatCount: 0, totalScore: 0, scoreCount: 0 };
         
         const entryDate = parseMisDate(entry.inDate);
         if (entryDate) {
@@ -339,7 +357,7 @@ export default function MisDashboardPage() {
           current.inProcess3Plus++;
         }
         
-        associateMap.set(entry.pdPersonId, current);
+        associateMap.set(effectiveAssociateId, current);
       }
     });
     
@@ -356,7 +374,7 @@ export default function MisDashboardPage() {
         avgScore: data.scoreCount > 0 ? (data.totalScore / data.scoreCount).toFixed(1) : "-",
       };
     }).sort((a, b) => b.casesDone - a.casesDone);
-  }, [filteredReports, filteredMisEntries, associates]);
+  }, [filteredReports, filteredMisEntries, associates, reports]);
 
   const calendarHeatmapData = useMemo(() => {
     const dayStatusMap = new Map<string, { total: number; completed: number; inProcess: number }>();
