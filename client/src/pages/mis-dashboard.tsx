@@ -312,17 +312,56 @@ export default function MisDashboardPage() {
 
   const scoreData = useMemo(() => {
     const withScore = filteredReports.filter(r => r.scores?.comprehensive !== undefined);
-    const range60_70 = withScore.filter(r => (r.scores?.comprehensive || 0) >= 60 && (r.scores?.comprehensive || 0) < 70).length;
-    const range70_80 = withScore.filter(r => (r.scores?.comprehensive || 0) >= 70 && (r.scores?.comprehensive || 0) < 80).length;
-    const range80_90 = withScore.filter(r => (r.scores?.comprehensive || 0) >= 80 && (r.scores?.comprehensive || 0) <= 100).length;
-    const below60 = withScore.filter(r => (r.scores?.comprehensive || 0) < 60).length;
-    
-    const avgScore = withScore.length > 0 
-      ? withScore.reduce((sum, r) => sum + (r.scores?.comprehensive || 0), 0) / withScore.length
+    const getScore = (r: Report) => r.scores?.comprehensive || 0;
+
+    const below60 = withScore.filter(r => getScore(r) < 60).length;
+    const range60_70 = withScore.filter(r => getScore(r) >= 60 && getScore(r) < 70).length;
+    const range70_80 = withScore.filter(r => getScore(r) >= 70 && getScore(r) < 80).length;
+    const range80_90 = withScore.filter(r => getScore(r) >= 80 && getScore(r) <= 100).length;
+
+    const avgScore = withScore.length > 0
+      ? withScore.reduce((sum, r) => sum + getScore(r), 0) / withScore.length
       : 0;
-    
-    return { range60_70, range70_80, range80_90, below60, avgScore: avgScore.toFixed(1) };
-  }, [filteredReports]);
+
+    // Associate-wise breakdown per score category
+    const assocScoreMap = new Map<string, { total: number; below60: number; range60_70: number; range70_80: number; range80_90: number }>();
+
+    withScore.forEach(r => {
+      const current = assocScoreMap.get(r.associateId) || { total: 0, below60: 0, range60_70: 0, range70_80: 0, range80_90: 0 };
+      current.total++;
+      const score = getScore(r);
+      if (score < 60) {
+        current.below60++;
+      } else if (score < 70) {
+        current.range60_70++;
+      } else if (score < 80) {
+        current.range70_80++;
+      } else {
+        current.range80_90++;
+      }
+      assocScoreMap.set(r.associateId, current);
+    });
+
+    const associateBreakdown = Array.from(assocScoreMap.entries()).map(([associateId, data]) => {
+      const associate = associates.find(a => a.id === associateId);
+      const pct = (count: number) => data.total > 0 ? Math.round((count / data.total) * 100) : 0;
+      return {
+        id: associateId,
+        name: associate?.name || associateId,
+        total: data.total,
+        below60: data.below60,
+        below60Pct: pct(data.below60),
+        range60_70: data.range60_70,
+        range60_70Pct: pct(data.range60_70),
+        range70_80: data.range70_80,
+        range70_80Pct: pct(data.range70_80),
+        range80_90: data.range80_90,
+        range80_90Pct: pct(data.range80_90),
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    return { range60_70, range70_80, range80_90, below60, avgScore: avgScore.toFixed(1), associateBreakdown };
+  }, [filteredReports, associates]);
 
   const associateData = useMemo(() => {
     const associateMap = new Map<string, { cases: number; inProcess1Day: number; inProcess2Days: number; inProcess3Plus: number; totalTat: number; tatCount: number; totalScore: number; scoreCount: number }>();
@@ -821,6 +860,7 @@ export default function MisDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -839,6 +879,23 @@ export default function MisDashboardPage() {
                   <TableCell className="text-center text-blue-600" data-testid="score-70-80">{scoreData.range70_80}</TableCell>
                   <TableCell className="text-center text-emerald-600" data-testid="score-80-90">{scoreData.range80_90}</TableCell>
                 </TableRow>
+                {scoreData.associateBreakdown.map((assoc) => (
+                  <TableRow key={assoc.id} className="text-[11px] text-slate-500">
+                    <TableCell className="py-1 font-medium text-slate-600">{assoc.name} <span className="text-slate-400">({assoc.total})</span></TableCell>
+                    <TableCell className="text-center py-1 text-red-600">
+                      {assoc.below60 > 0 ? <>{assoc.below60} <span className="text-[10px]">({assoc.below60Pct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-amber-600">
+                      {assoc.range60_70 > 0 ? <>{assoc.range60_70} <span className="text-[10px]">({assoc.range60_70Pct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-blue-600">
+                      {assoc.range70_80 > 0 ? <>{assoc.range70_80} <span className="text-[10px]">({assoc.range70_80Pct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-emerald-600">
+                      {assoc.range80_90 > 0 ? <>{assoc.range80_90} <span className="text-[10px]">({assoc.range80_90Pct}%)</span></> : "-"}
+                    </TableCell>
+                  </TableRow>
+                ))}
                 <TableRow className="bg-yellow-50">
                   <TableCell className="font-medium">Average Score for the month</TableCell>
                   <TableCell colSpan={4} className="text-center font-bold" data-testid="avg-score">
@@ -847,6 +904,10 @@ export default function MisDashboardPage() {
                 </TableRow>
               </TableBody>
             </Table>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              * Percentages show each associate's distribution of their own total scored cases
+            </p>
           </CardContent>
         </Card>
 
