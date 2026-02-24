@@ -1015,8 +1015,22 @@ export default function MisPage() {
                         <TableCell className="text-xs px-2">{entry.customerName}</TableCell>
                         <TableCell className="text-xs px-2">{entry.businessName || "-"}</TableCell>
                         <TableCell className="text-xs px-2">{entry.contactDetails || "-"}</TableCell>
-                        <TableCell className="text-[9px] px-1 w-[350px] leading-tight" title={entry.customerAddress || ""}>
-                          <div className="line-clamp-2">{entry.customerAddress || "-"}</div>
+                        <TableCell className="text-[9px] px-1 w-[350px] leading-tight">
+                          {entry.customerAddress ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <div className="line-clamp-2 cursor-pointer underline decoration-dotted decoration-blue-400 hover:text-blue-700 active:text-blue-700">
+                                  {entry.customerAddress}
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[300px] text-sm p-3" side="top">
+                                <div className="font-semibold text-xs text-blue-700 mb-1">Full Address</div>
+                                <div className="text-xs leading-relaxed text-slate-700">{entry.customerAddress}</div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            <div>-</div>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs px-2">{entry.location || "-"}</TableCell>
                         <TableCell className="text-xs px-2">{entry.product || "-"}</TableCell>
@@ -1339,8 +1353,22 @@ export default function MisPage() {
                         <TableCell className="text-xs px-2">{entry.customerName}</TableCell>
                         <TableCell className="text-xs px-2">{entry.businessName || "-"}</TableCell>
                         <TableCell className="text-xs px-2">{entry.contactDetails || "-"}</TableCell>
-                        <TableCell className="text-[9px] px-1 w-[350px] leading-tight" title={entry.customerAddress || ""}>
-                          <div className="line-clamp-2">{entry.customerAddress || "-"}</div>
+                        <TableCell className="text-[9px] px-1 w-[350px] leading-tight">
+                          {entry.customerAddress ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <div className="line-clamp-2 cursor-pointer underline decoration-dotted decoration-blue-400 hover:text-blue-700 active:text-blue-700">
+                                  {entry.customerAddress}
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[300px] text-sm p-3" side="top">
+                                <div className="font-semibold text-xs text-blue-700 mb-1">Full Address</div>
+                                <div className="text-xs leading-relaxed text-slate-700">{entry.customerAddress}</div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            <div>-</div>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs px-2">{entry.location || "-"}</TableCell>
                         <TableCell className="text-xs px-2 whitespace-nowrap">{formatMisDate(entry.inDate)}</TableCell>
