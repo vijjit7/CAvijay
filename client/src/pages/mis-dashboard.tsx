@@ -249,24 +249,66 @@ export default function MisDashboardPage() {
 
   const tatData = useMemo(() => {
     const getTatHours = (r: Report) => r.tat?.totalTATHours ?? r.tat?.totalHours ?? null;
-    
+
     const withTat = filteredReports.filter(r => getTatHours(r) !== null && getTatHours(r) !== undefined);
-    
+
     const exceptional = withTat.filter(r => r.tatDelayReason && r.tatDelayReason.trim() !== '');
     const nonExceptional = withTat.filter(r => !r.tatDelayReason || r.tatDelayReason.trim() === '');
-    
+
     const zeroDay = nonExceptional.filter(r => (getTatHours(r) ?? 0) < 24).length;
     const oneDay = nonExceptional.filter(r => (getTatHours(r) ?? 0) >= 24 && (getTatHours(r) ?? 0) < 48).length;
     const twoDays = nonExceptional.filter(r => (getTatHours(r) ?? 0) >= 48 && (getTatHours(r) ?? 0) < 72).length;
     const threeDaysPlus = nonExceptional.filter(r => (getTatHours(r) ?? 0) >= 72).length;
     const exceptionalCount = exceptional.length;
-    
-    const avgTat = nonExceptional.length > 0 
+
+    const avgTat = nonExceptional.length > 0
       ? nonExceptional.reduce((sum, r) => sum + (getTatHours(r) ?? 0), 0) / nonExceptional.length / 24
       : 0;
-    
-    return { zeroDay, oneDay, twoDays, threeDaysPlus, exceptionalCount, avgTat: avgTat.toFixed(1) };
-  }, [filteredReports]);
+
+    // Associate-wise breakdown per TAT category
+    const assocTatMap = new Map<string, { total: number; zeroDay: number; oneDay: number; twoDays: number; threeDaysPlus: number; exceptional: number }>();
+
+    withTat.forEach(r => {
+      const current = assocTatMap.get(r.associateId) || { total: 0, zeroDay: 0, oneDay: 0, twoDays: 0, threeDaysPlus: 0, exceptional: 0 };
+      current.total++;
+      const hours = getTatHours(r) ?? 0;
+      const isExceptional = r.tatDelayReason && r.tatDelayReason.trim() !== '';
+      if (isExceptional) {
+        current.exceptional++;
+      } else if (hours < 24) {
+        current.zeroDay++;
+      } else if (hours < 48) {
+        current.oneDay++;
+      } else if (hours < 72) {
+        current.twoDays++;
+      } else {
+        current.threeDaysPlus++;
+      }
+      assocTatMap.set(r.associateId, current);
+    });
+
+    const associateBreakdown = Array.from(assocTatMap.entries()).map(([associateId, data]) => {
+      const associate = associates.find(a => a.id === associateId);
+      const pct = (count: number) => data.total > 0 ? Math.round((count / data.total) * 100) : 0;
+      return {
+        id: associateId,
+        name: associate?.name || associateId,
+        total: data.total,
+        zeroDay: data.zeroDay,
+        zeroDayPct: pct(data.zeroDay),
+        oneDay: data.oneDay,
+        oneDayPct: pct(data.oneDay),
+        twoDays: data.twoDays,
+        twoDaysPct: pct(data.twoDays),
+        threeDaysPlus: data.threeDaysPlus,
+        threeDaysPlusPct: pct(data.threeDaysPlus),
+        exceptional: data.exceptional,
+        exceptionalPct: pct(data.exceptional),
+      };
+    }).sort((a, b) => b.total - a.total);
+
+    return { zeroDay, oneDay, twoDays, threeDaysPlus, exceptionalCount, avgTat: avgTat.toFixed(1), associateBreakdown };
+  }, [filteredReports, associates]);
 
   const scoreData = useMemo(() => {
     const withScore = filteredReports.filter(r => r.scores?.comprehensive !== undefined);
@@ -714,6 +756,7 @@ export default function MisDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -734,6 +777,26 @@ export default function MisDashboardPage() {
                   <TableCell className="text-center text-red-600" data-testid="tat-3days">{tatData.threeDaysPlus}</TableCell>
                   <TableCell className="text-center bg-amber-50 text-amber-700 font-medium" data-testid="tat-exceptional">{tatData.exceptionalCount}</TableCell>
                 </TableRow>
+                {tatData.associateBreakdown.map((assoc) => (
+                  <TableRow key={assoc.id} className="text-[11px] text-slate-500">
+                    <TableCell className="py-1 font-medium text-slate-600">{assoc.name} <span className="text-slate-400">({assoc.total})</span></TableCell>
+                    <TableCell className="text-center py-1 text-emerald-600">
+                      {assoc.zeroDay > 0 ? <>{assoc.zeroDay} <span className="text-[10px]">({assoc.zeroDayPct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-green-600">
+                      {assoc.oneDay > 0 ? <>{assoc.oneDay} <span className="text-[10px]">({assoc.oneDayPct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-blue-600">
+                      {assoc.twoDays > 0 ? <>{assoc.twoDays} <span className="text-[10px]">({assoc.twoDaysPct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-red-600">
+                      {assoc.threeDaysPlus > 0 ? <>{assoc.threeDaysPlus} <span className="text-[10px]">({assoc.threeDaysPlusPct}%)</span></> : "-"}
+                    </TableCell>
+                    <TableCell className="text-center py-1 bg-amber-50 text-amber-700">
+                      {assoc.exceptional > 0 ? <>{assoc.exceptional} <span className="text-[10px]">({assoc.exceptionalPct}%)</span></> : "-"}
+                    </TableCell>
+                  </TableRow>
+                ))}
                 <TableRow className="bg-yellow-50">
                   <TableCell className="font-medium">Average TAT for the period</TableCell>
                   <TableCell colSpan={5} className="text-center font-bold" data-testid="avg-tat">
@@ -742,8 +805,10 @@ export default function MisDashboardPage() {
                 </TableRow>
               </TableBody>
             </Table>
+            </div>
             <p className="text-xs text-slate-500 mt-2">
               * Exceptional Cases: Reports with TAT delay reason recorded (excluded from day counts)
+              <br />* Percentages show each associate's distribution of their own total cases
             </p>
           </CardContent>
         </Card>
