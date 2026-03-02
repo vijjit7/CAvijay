@@ -297,17 +297,24 @@ export default function MisDashboardPage() {
         zeroDay: data.zeroDay,
         zeroDayPct: pct(data.zeroDay),
         oneDay: data.oneDay,
-        oneDayPct: pct(data.oneDay),
+        oneDayCumPct: pct(data.zeroDay + data.oneDay),
         twoDays: data.twoDays,
-        twoDaysPct: pct(data.twoDays),
+        twoDaysCumPct: pct(data.zeroDay + data.oneDay + data.twoDays),
         threeDaysPlus: data.threeDaysPlus,
-        threeDaysPlusPct: pct(data.threeDaysPlus),
+        threeDaysPlusCumPct: pct(data.zeroDay + data.oneDay + data.twoDays + data.threeDaysPlus),
         exceptional: data.exceptional,
         exceptionalPct: pct(data.exceptional),
       };
     }).sort((a, b) => b.total - a.total);
 
-    return { zeroDay, oneDay, twoDays, threeDaysPlus, exceptionalCount, avgTat: avgTat.toFixed(1), associateBreakdown };
+    const totalNonExceptional = nonExceptional.length;
+    const totalPct = (count: number) => totalNonExceptional > 0 ? Math.round((count / totalNonExceptional) * 100) : 0;
+    const zeroDayPct = totalPct(zeroDay);
+    const oneDayCumPct = totalPct(zeroDay + oneDay);
+    const twoDaysCumPct = totalPct(zeroDay + oneDay + twoDays);
+    const threeDaysPlusCumPct = totalPct(zeroDay + oneDay + twoDays + threeDaysPlus);
+
+    return { zeroDay, oneDay, twoDays, threeDaysPlus, exceptionalCount, avgTat: avgTat.toFixed(1), associateBreakdown, zeroDayPct, oneDayCumPct, twoDaysCumPct, threeDaysPlusCumPct };
   }, [filteredReports, associates]);
 
   const scoreData = useMemo(() => {
@@ -350,17 +357,24 @@ export default function MisDashboardPage() {
         name: associate?.name || associateId,
         total: data.total,
         below60: data.below60,
-        below60Pct: pct(data.below60),
+        below60CumPct: pct(data.below60),
         range60_70: data.range60_70,
-        range60_70Pct: pct(data.range60_70),
+        range60_70CumPct: pct(data.below60 + data.range60_70),
         range70_80: data.range70_80,
-        range70_80Pct: pct(data.range70_80),
+        range70_80CumPct: pct(data.below60 + data.range60_70 + data.range70_80),
         range80_90: data.range80_90,
-        range80_90Pct: pct(data.range80_90),
+        range80_90CumPct: pct(data.below60 + data.range60_70 + data.range70_80 + data.range80_90),
       };
     }).sort((a, b) => b.total - a.total);
 
-    return { range60_70, range70_80, range80_90, below60, avgScore: avgScore.toFixed(1), associateBreakdown };
+    const totalScored = withScore.length;
+    const scorePct = (count: number) => totalScored > 0 ? Math.round((count / totalScored) * 100) : 0;
+    const below60CumPct = scorePct(below60);
+    const range60_70CumPct = scorePct(below60 + range60_70);
+    const range70_80CumPct = scorePct(below60 + range60_70 + range70_80);
+    const range80_90CumPct = scorePct(below60 + range60_70 + range70_80 + range80_90);
+
+    return { range60_70, range70_80, range80_90, below60, avgScore: avgScore.toFixed(1), associateBreakdown, below60CumPct, range60_70CumPct, range70_80CumPct, range80_90CumPct };
   }, [filteredReports, associates]);
 
   const associateData = useMemo(() => {
@@ -810,10 +824,10 @@ export default function MisDashboardPage() {
               <TableBody>
                 <TableRow>
                   <TableCell className="font-medium">Cases</TableCell>
-                  <TableCell className="text-center text-emerald-600 font-medium" data-testid="tat-0day">{tatData.zeroDay}</TableCell>
-                  <TableCell className="text-center text-green-600" data-testid="tat-1day">{tatData.oneDay}</TableCell>
-                  <TableCell className="text-center text-blue-600" data-testid="tat-2days">{tatData.twoDays}</TableCell>
-                  <TableCell className="text-center text-red-600" data-testid="tat-3days">{tatData.threeDaysPlus}</TableCell>
+                  <TableCell className="text-center text-emerald-600 font-medium" data-testid="tat-0day">{tatData.zeroDay} <span className="text-[10px]">({tatData.zeroDayPct}%)</span></TableCell>
+                  <TableCell className="text-center text-green-600" data-testid="tat-1day">{tatData.oneDay} <span className="text-[10px]">({tatData.oneDayCumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-blue-600" data-testid="tat-2days">{tatData.twoDays} <span className="text-[10px]">({tatData.twoDaysCumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-red-600" data-testid="tat-3days">{tatData.threeDaysPlus} <span className="text-[10px]">({tatData.threeDaysPlusCumPct}%)</span></TableCell>
                   <TableCell className="text-center bg-amber-50 text-amber-700 font-medium" data-testid="tat-exceptional">{tatData.exceptionalCount}</TableCell>
                 </TableRow>
                 {tatData.associateBreakdown.map((assoc) => (
@@ -823,13 +837,13 @@ export default function MisDashboardPage() {
                       {assoc.zeroDay > 0 ? <>{assoc.zeroDay} <span className="text-[10px]">({assoc.zeroDayPct}%)</span></> : "-"}
                     </TableCell>
                     <TableCell className="text-center py-1 text-green-600">
-                      {assoc.oneDay > 0 ? <>{assoc.oneDay} <span className="text-[10px]">({assoc.oneDayPct}%)</span></> : "-"}
+                      {assoc.oneDay > 0 ? <>{assoc.oneDay} <span className="text-[10px]">({assoc.oneDayCumPct}%)</span></> : <>{assoc.oneDayCumPct > 0 ? <span className="text-[10px]">({assoc.oneDayCumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 text-blue-600">
-                      {assoc.twoDays > 0 ? <>{assoc.twoDays} <span className="text-[10px]">({assoc.twoDaysPct}%)</span></> : "-"}
+                      {assoc.twoDays > 0 ? <>{assoc.twoDays} <span className="text-[10px]">({assoc.twoDaysCumPct}%)</span></> : <>{assoc.twoDaysCumPct > 0 ? <span className="text-[10px]">({assoc.twoDaysCumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 text-red-600">
-                      {assoc.threeDaysPlus > 0 ? <>{assoc.threeDaysPlus} <span className="text-[10px]">({assoc.threeDaysPlusPct}%)</span></> : "-"}
+                      {assoc.threeDaysPlus > 0 ? <>{assoc.threeDaysPlus} <span className="text-[10px]">({assoc.threeDaysPlusCumPct}%)</span></> : <>{assoc.threeDaysPlusCumPct > 0 ? <span className="text-[10px]">({assoc.threeDaysPlusCumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 bg-amber-50 text-amber-700">
                       {assoc.exceptional > 0 ? <>{assoc.exceptional} <span className="text-[10px]">({assoc.exceptionalPct}%)</span></> : "-"}
@@ -847,7 +861,7 @@ export default function MisDashboardPage() {
             </div>
             <p className="text-xs text-slate-500 mt-2">
               * Exceptional Cases: Reports with TAT delay reason recorded (excluded from day counts)
-              <br />* Percentages show each associate's distribution of their own total cases
+              <br />* Percentages are cumulative (e.g., 1 Day % = cases completed within 0 + 1 day)
             </p>
           </CardContent>
         </Card>
@@ -874,25 +888,25 @@ export default function MisDashboardPage() {
               <TableBody>
                 <TableRow>
                   <TableCell className="font-medium">Cases</TableCell>
-                  <TableCell className="text-center text-red-600" data-testid="score-below60">{scoreData.below60}</TableCell>
-                  <TableCell className="text-center text-amber-600" data-testid="score-60-70">{scoreData.range60_70}</TableCell>
-                  <TableCell className="text-center text-blue-600" data-testid="score-70-80">{scoreData.range70_80}</TableCell>
-                  <TableCell className="text-center text-emerald-600" data-testid="score-80-90">{scoreData.range80_90}</TableCell>
+                  <TableCell className="text-center text-red-600" data-testid="score-below60">{scoreData.below60} <span className="text-[10px]">({scoreData.below60CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-amber-600" data-testid="score-60-70">{scoreData.range60_70} <span className="text-[10px]">({scoreData.range60_70CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-blue-600" data-testid="score-70-80">{scoreData.range70_80} <span className="text-[10px]">({scoreData.range70_80CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-emerald-600" data-testid="score-80-90">{scoreData.range80_90} <span className="text-[10px]">({scoreData.range80_90CumPct}%)</span></TableCell>
                 </TableRow>
                 {scoreData.associateBreakdown.map((assoc) => (
                   <TableRow key={assoc.id} className="text-[11px] text-slate-500">
                     <TableCell className="py-1 font-medium text-slate-600">{assoc.name} <span className="text-slate-400">({assoc.total})</span></TableCell>
                     <TableCell className="text-center py-1 text-red-600">
-                      {assoc.below60 > 0 ? <>{assoc.below60} <span className="text-[10px]">({assoc.below60Pct}%)</span></> : "-"}
+                      {assoc.below60 > 0 ? <>{assoc.below60} <span className="text-[10px]">({assoc.below60CumPct}%)</span></> : "-"}
                     </TableCell>
                     <TableCell className="text-center py-1 text-amber-600">
-                      {assoc.range60_70 > 0 ? <>{assoc.range60_70} <span className="text-[10px]">({assoc.range60_70Pct}%)</span></> : "-"}
+                      {assoc.range60_70 > 0 ? <>{assoc.range60_70} <span className="text-[10px]">({assoc.range60_70CumPct}%)</span></> : <>{assoc.range60_70CumPct > 0 ? <span className="text-[10px]">({assoc.range60_70CumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 text-blue-600">
-                      {assoc.range70_80 > 0 ? <>{assoc.range70_80} <span className="text-[10px]">({assoc.range70_80Pct}%)</span></> : "-"}
+                      {assoc.range70_80 > 0 ? <>{assoc.range70_80} <span className="text-[10px]">({assoc.range70_80CumPct}%)</span></> : <>{assoc.range70_80CumPct > 0 ? <span className="text-[10px]">({assoc.range70_80CumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 text-emerald-600">
-                      {assoc.range80_90 > 0 ? <>{assoc.range80_90} <span className="text-[10px]">({assoc.range80_90Pct}%)</span></> : "-"}
+                      {assoc.range80_90 > 0 ? <>{assoc.range80_90} <span className="text-[10px]">({assoc.range80_90CumPct}%)</span></> : <>{assoc.range80_90CumPct > 0 ? <span className="text-[10px]">({assoc.range80_90CumPct}%)</span> : "-"}</>}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -906,7 +920,7 @@ export default function MisDashboardPage() {
             </Table>
             </div>
             <p className="text-xs text-slate-500 mt-2">
-              * Percentages show each associate's distribution of their own total scored cases
+              * Percentages are cumulative (e.g., 60-70 % = cases scoring Below 60 + 60-70 combined)
             </p>
           </CardContent>
         </Card>
