@@ -357,22 +357,22 @@ export default function MisDashboardPage() {
         name: associate?.name || associateId,
         total: data.total,
         below60: data.below60,
-        below60CumPct: pct(data.below60),
+        below60CumPct: pct(data.below60 + data.range60_70 + data.range70_80 + data.range80_90),
         range60_70: data.range60_70,
-        range60_70CumPct: pct(data.below60 + data.range60_70),
+        range60_70CumPct: pct(data.range60_70 + data.range70_80 + data.range80_90),
         range70_80: data.range70_80,
-        range70_80CumPct: pct(data.below60 + data.range60_70 + data.range70_80),
+        range70_80CumPct: pct(data.range70_80 + data.range80_90),
         range80_90: data.range80_90,
-        range80_90CumPct: pct(data.below60 + data.range60_70 + data.range70_80 + data.range80_90),
+        range80_90CumPct: pct(data.range80_90),
       };
     }).sort((a, b) => b.total - a.total);
 
     const totalScored = withScore.length;
     const scorePct = (count: number) => totalScored > 0 ? Math.round((count / totalScored) * 100) : 0;
-    const below60CumPct = scorePct(below60);
-    const range60_70CumPct = scorePct(below60 + range60_70);
-    const range70_80CumPct = scorePct(below60 + range60_70 + range70_80);
-    const range80_90CumPct = scorePct(below60 + range60_70 + range70_80 + range80_90);
+    const range80_90CumPct = scorePct(range80_90);
+    const range70_80CumPct = scorePct(range70_80 + range80_90);
+    const range60_70CumPct = scorePct(range60_70 + range70_80 + range80_90);
+    const below60CumPct = scorePct(below60 + range60_70 + range70_80 + range80_90);
 
     return { range60_70, range70_80, range80_90, below60, avgScore: avgScore.toFixed(1), associateBreakdown, below60CumPct, range60_70CumPct, range70_80CumPct, range80_90CumPct };
   }, [filteredReports, associates]);
@@ -879,34 +879,34 @@ export default function MisDashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead></TableHead>
-                  <TableHead className="text-center">Below 60</TableHead>
-                  <TableHead className="text-center">60-70</TableHead>
-                  <TableHead className="text-center">70-80</TableHead>
                   <TableHead className="text-center">80-90+</TableHead>
+                  <TableHead className="text-center">70-80</TableHead>
+                  <TableHead className="text-center">60-70</TableHead>
+                  <TableHead className="text-center">Below 60</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 <TableRow>
                   <TableCell className="font-medium">Cases</TableCell>
-                  <TableCell className="text-center text-red-600" data-testid="score-below60">{scoreData.below60} <span className="text-[10px]">({scoreData.below60CumPct}%)</span></TableCell>
-                  <TableCell className="text-center text-amber-600" data-testid="score-60-70">{scoreData.range60_70} <span className="text-[10px]">({scoreData.range60_70CumPct}%)</span></TableCell>
-                  <TableCell className="text-center text-blue-600" data-testid="score-70-80">{scoreData.range70_80} <span className="text-[10px]">({scoreData.range70_80CumPct}%)</span></TableCell>
                   <TableCell className="text-center text-emerald-600" data-testid="score-80-90">{scoreData.range80_90} <span className="text-[10px]">({scoreData.range80_90CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-blue-600" data-testid="score-70-80">{scoreData.range70_80} <span className="text-[10px]">({scoreData.range70_80CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-amber-600" data-testid="score-60-70">{scoreData.range60_70} <span className="text-[10px]">({scoreData.range60_70CumPct}%)</span></TableCell>
+                  <TableCell className="text-center text-red-600" data-testid="score-below60">{scoreData.below60} <span className="text-[10px]">({scoreData.below60CumPct}%)</span></TableCell>
                 </TableRow>
                 {scoreData.associateBreakdown.map((assoc) => (
                   <TableRow key={assoc.id} className="text-[11px] text-slate-500">
                     <TableCell className="py-1 font-medium text-slate-600">{assoc.name} <span className="text-slate-400">({assoc.total})</span></TableCell>
-                    <TableCell className="text-center py-1 text-red-600">
-                      {assoc.below60 > 0 ? <>{assoc.below60} <span className="text-[10px]">({assoc.below60CumPct}%)</span></> : "-"}
-                    </TableCell>
-                    <TableCell className="text-center py-1 text-amber-600">
-                      {assoc.range60_70 > 0 ? <>{assoc.range60_70} <span className="text-[10px]">({assoc.range60_70CumPct}%)</span></> : <>{assoc.range60_70CumPct > 0 ? <span className="text-[10px]">({assoc.range60_70CumPct}%)</span> : "-"}</>}
+                    <TableCell className="text-center py-1 text-emerald-600">
+                      {assoc.range80_90 > 0 ? <>{assoc.range80_90} <span className="text-[10px]">({assoc.range80_90CumPct}%)</span></> : <>{assoc.range80_90CumPct > 0 ? <span className="text-[10px]">({assoc.range80_90CumPct}%)</span> : "-"}</>}
                     </TableCell>
                     <TableCell className="text-center py-1 text-blue-600">
                       {assoc.range70_80 > 0 ? <>{assoc.range70_80} <span className="text-[10px]">({assoc.range70_80CumPct}%)</span></> : <>{assoc.range70_80CumPct > 0 ? <span className="text-[10px]">({assoc.range70_80CumPct}%)</span> : "-"}</>}
                     </TableCell>
-                    <TableCell className="text-center py-1 text-emerald-600">
-                      {assoc.range80_90 > 0 ? <>{assoc.range80_90} <span className="text-[10px]">({assoc.range80_90CumPct}%)</span></> : <>{assoc.range80_90CumPct > 0 ? <span className="text-[10px]">({assoc.range80_90CumPct}%)</span> : "-"}</>}
+                    <TableCell className="text-center py-1 text-amber-600">
+                      {assoc.range60_70 > 0 ? <>{assoc.range60_70} <span className="text-[10px]">({assoc.range60_70CumPct}%)</span></> : <>{assoc.range60_70CumPct > 0 ? <span className="text-[10px]">({assoc.range60_70CumPct}%)</span> : "-"}</>}
+                    </TableCell>
+                    <TableCell className="text-center py-1 text-red-600">
+                      {assoc.below60 > 0 ? <>{assoc.below60} <span className="text-[10px]">({assoc.below60CumPct}%)</span></> : <>{assoc.below60CumPct > 0 ? <span className="text-[10px]">({assoc.below60CumPct}%)</span> : "-"}</>}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -920,7 +920,7 @@ export default function MisDashboardPage() {
             </Table>
             </div>
             <p className="text-xs text-slate-500 mt-2">
-              * Percentages are cumulative (e.g., 60-70 % = cases scoring Below 60 + 60-70 combined)
+              * Percentages are cumulative (e.g., 70-80 % = cases scoring 80-90+ and 70-80 combined)
             </p>
           </CardContent>
         </Card>
