@@ -63,6 +63,7 @@ export interface IStorage {
   deleteAllMisEntries(): Promise<number>;
   getTotalReportsCount(): Promise<number>;
   getTotalMisEntriesCount(): Promise<number>;
+  purgePdfContent(fromDate: string, toDate: string): Promise<number>;
 }
 
 // In-memory storage for local development (when DATABASE_URL is not set)
@@ -505,6 +506,13 @@ export class PostgresStorage implements IStorage {
   async getTotalMisEntriesCount(): Promise<number> {
     const result = await this.db.execute(sql`SELECT COUNT(*) as count FROM mis_entries`);
     return parseInt((result.rows?.[0] as any)?.count || '0', 10);
+  }
+
+  async purgePdfContent(fromDate: string, toDate: string): Promise<number> {
+    const result = await this.db.execute(
+      sql`UPDATE reports SET pdf_content = NULL WHERE date >= ${fromDate} AND date <= ${toDate} AND pdf_content IS NOT NULL`
+    );
+    return result.rowCount ?? 0;
   }
 }
 

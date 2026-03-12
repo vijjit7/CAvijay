@@ -3506,6 +3506,34 @@ showpage
     }
   });
 
+  // Purge PDF content from reports (nulls pdf_content without deleting reports)
+  app.post("/api/admin/purge-pdf-content", async (req, res) => {
+    try {
+      const sessionUserId = req.session?.userId;
+      if (sessionUserId !== 'ADMIN') {
+        return res.status(403).json({ error: "Only admin can purge PDF content" });
+      }
+
+      const { fromDate, toDate } = req.body;
+      if (!fromDate || !toDate) {
+        return res.status(400).json({ error: "Both fromDate and toDate are required" });
+      }
+
+      console.log(`[PURGE] Purging PDF content from ${fromDate} to ${toDate}`);
+      const purgedCount = await storage.purgePdfContent(fromDate, toDate);
+      console.log(`[PURGE] Purged ${purgedCount} reports`);
+
+      return res.json({
+        success: true,
+        purgedCount,
+        message: `Purged PDF content from ${purgedCount} reports (${fromDate} to ${toDate})`
+      });
+    } catch (error) {
+      console.error("Purge PDF content error:", error);
+      return res.status(500).json({ error: "Failed to purge PDF content" });
+    }
+  });
+
   // Get combined dashboard stats (current + archived)
   app.get("/api/admin/combined-stats", async (req, res) => {
     try {

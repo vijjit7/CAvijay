@@ -13,7 +13,7 @@ import {
   Line,
   Legend
 } from "recharts";
-import { ArrowUpRight, ArrowDownRight, CheckCircle2, AlertCircle, FileText, Calendar, Award, TrendingUp, Users, Download, Archive, AlertTriangle } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, CheckCircle2, AlertCircle, FileText, Calendar, Award, TrendingUp, Users, Download, Archive, AlertTriangle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
@@ -233,6 +233,8 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
   const [exporting, setExporting] = useState(false);
   const [exportFromDate, setExportFromDate] = useState("");
   const [exportToDate, setExportToDate] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
 
   const handleExportReports = async () => {
     setExporting(true);
@@ -324,20 +326,64 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
     }
   };
   
-  // Month mapping
-  const monthMap: { [key: string]: number } = {
-    'January': 1, 'February': 2, 'March': 3, 'April': 4,
-    'May': 5, 'June': 6, 'July': 7, 'August': 8,
-    'September': 9, 'October': 10, 'November': 11, 'December': 12
+  const handlePurgePdfContent = async () => {
+    if (!exportFromDate || !exportToDate) {
+      toast({
+        title: "Date range required",
+        description: "Please select both From and To dates before purging.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPurging(true);
+    try {
+      const response = await fetch('/api/admin/purge-pdf-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ fromDate: exportFromDate, toDate: exportToDate }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Purge failed');
+      }
+
+      const result = await response.json();
+      toast({
+        title: "Purge Complete",
+        description: `Purged PDF content from ${result.purgedCount} reports. Report metadata is preserved.`,
+      });
+      setPurgeDialogOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Purge Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setPurging(false);
+    }
   };
-  
-  // Filter reports by selected month
+
+  // Month-year mapping for filter (month is 0-indexed for JS Date)
+  const monthYearMap: { [key: string]: { month: number; year: number } } = {
+    'October': { month: 9, year: 2025 },
+    'November': { month: 10, year: 2025 },
+    'December': { month: 11, year: 2025 },
+    'January': { month: 0, year: 2026 },
+    'February': { month: 1, year: 2026 },
+    'March': { month: 2, year: 2026 },
+  };
+
+  // Filter reports by selected month+year
   const getMonthReports = (month: string) => {
     if (month === 'All') return reports;
-    const monthNum = monthMap[month];
+    const my = monthYearMap[month];
+    if (!my) return reports;
     return reports.filter((r: any) => {
       const reportDate = new Date(r.date);
-      return reportDate.getMonth() + 1 === monthNum;
+      return reportDate.getMonth() === my.month && reportDate.getFullYear() === my.year;
     });
   };
   
@@ -400,6 +446,9 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
                    <SelectItem value="October">October 2025</SelectItem>
                    <SelectItem value="November">November 2025</SelectItem>
                    <SelectItem value="December">December 2025</SelectItem>
+                   <SelectItem value="January">January 2026</SelectItem>
+                   <SelectItem value="February">February 2026</SelectItem>
+                   <SelectItem value="March">March 2026</SelectItem>
                  </SelectContent>
                </Select>
              </div>
@@ -428,18 +477,38 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
                  data-testid="input-export-to-date"
                />
              </div>
-             <Button 
-               variant="outline" 
-               onClick={handleExportReports} 
+             <Button
+               variant="outline"
+               onClick={handleExportReports}
                disabled={exporting}
                data-testid="button-export-reports"
              >
                <Download className="h-4 w-4 mr-2" />
                {exporting ? 'Exporting...' : (exportFromDate || exportToDate ? 'Export Range' : 'Export All')}
              </Button>
-             <Button 
-               variant="destructive" 
-               onClick={() => setArchiveDialogOpen(true)} 
+             <Button
+               variant="outline"
+               className="text-orange-600 border-orange-300 hover:bg-orange-50"
+               onClick={() => {
+                 if (!exportFromDate || !exportToDate) {
+                   toast({
+                     title: "Date range required",
+                     description: "Please select both From and To dates before purging.",
+                     variant: "destructive",
+                   });
+                   return;
+                 }
+                 setPurgeDialogOpen(true);
+               }}
+               disabled={purging}
+               data-testid="button-purge-pdfs"
+             >
+               <Trash2 className="h-4 w-4 mr-2" />
+               {purging ? 'Purging...' : 'Purge PDFs'}
+             </Button>
+             <Button
+               variant="destructive"
+               onClick={() => setArchiveDialogOpen(true)}
                disabled={reports.length === 0}
                data-testid="button-archive-reports"
              >
@@ -655,6 +724,42 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
           </CardContent>
         </Card>
       </div>
+
+      {/* Purge PDF Content Confirmation Dialog */}
+      <Dialog open={purgeDialogOpen} onOpenChange={setPurgeDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
+              <Trash2 className="h-5 w-5" />
+              Purge PDF Content
+            </DialogTitle>
+            <DialogDescription className="space-y-3 pt-3">
+              <p>
+                This will remove the PDF file data from reports between <strong>{exportFromDate}</strong> and <strong>{exportToDate}</strong>.
+              </p>
+              <p>
+                Report metadata (scores, decisions, dates, etc.) will be <strong>preserved</strong>. Only the PDF binary content will be cleared to free database space.
+              </p>
+              <p className="text-sm text-orange-600 font-medium">
+                Make sure you have exported and saved the PDFs before purging!
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPurgeDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handlePurgePdfContent}
+              disabled={purging}
+              data-testid="button-confirm-purge"
+            >
+              {purging ? 'Purging...' : 'Yes, Purge PDF Content'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Archive Confirmation Dialog */}
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
