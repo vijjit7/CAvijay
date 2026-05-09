@@ -4,7 +4,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 
 // Fallback users for local development when database is not available
 const DEFAULT_USERS: User[] = [
-  { id: 'ADMIN', username: 'admin', password: 'password123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
   { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
   { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
   { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
@@ -19,6 +19,7 @@ export interface IStorage {
   getUserById(id: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   deleteUser(id: string): Promise<boolean>;
+  updateUserPassword(id: string, password: string): Promise<boolean>;
   createReport(report: InsertReport & { id: string }): Promise<Report>;
   getReports(filters?: { 
     associateId?: string; 
@@ -112,6 +113,17 @@ export class PostgresStorage implements IStorage {
 
   async deleteUser(id: string): Promise<boolean> {
     const result = await this.db.delete(users).where(eq(users.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async updateUserPassword(id: string, password: string): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const user = DEFAULT_USERS.find(u => u.id === id);
+      if (!user) return false;
+      user.password = password;
+      return true;
+    }
+    const result = await this.db.update(users).set({ password }).where(eq(users.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

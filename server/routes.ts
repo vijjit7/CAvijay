@@ -22,8 +22,11 @@ import exifr from "exifr";
 // import { db } from "./db";
 // import { sql } from "drizzle-orm";
 
+const DEFAULT_ADMIN_PASSWORD = 'password@123';
+const LEGACY_ADMIN_PASSWORD = 'password123';
+
 const DEFAULT_USERS = [
-  { id: 'ADMIN', username: 'admin', password: 'password123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
   { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
   { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
   { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
@@ -56,6 +59,18 @@ async function ensureUsersExist() {
     console.log('Default users check complete');
   } catch (error) {
     console.error('Error seeding users (non-fatal):', error);
+  }
+}
+
+async function migrateAdminPassword() {
+  try {
+    const admin = await storage.getUserByUsername('admin');
+    if (admin && admin.password === LEGACY_ADMIN_PASSWORD) {
+      await storage.updateUserPassword('ADMIN', DEFAULT_ADMIN_PASSWORD);
+      console.log('[Migration] Admin password rotated from legacy default to password@123');
+    }
+  } catch (error) {
+    console.error('[Migration] Admin password migration failed (non-fatal):', error);
   }
 }
 
@@ -564,6 +579,7 @@ export async function registerRoutes(
 
   // Ensure default users exist on startup (works for both dev and production)
   await ensureUsersExist();
+  await migrateAdminPassword();
   
   // Ensure session table exists for connect-pg-simple
   try {
@@ -985,7 +1001,7 @@ export async function registerRoutes(
         console.error("Database error looking up user:", dbError);
         // Fallback to default users if database fails
         const DEFAULT_USERS = [
-          { id: 'ADMIN', username: 'admin', password: 'password123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
+          { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
           { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
           { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
           { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
@@ -1015,12 +1031,13 @@ export async function registerRoutes(
         role: user.role,
         avatar: user.avatar,
         isAdmin: user.id === 'ADMIN',
+        mustChangePassword: user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD,
       };
-      
+
       if (req.session) {
         req.session.userId = user.id;
         req.session.username = user.username;
-        
+
         // Explicitly save session to ensure it's persisted before response
         return new Promise<void>((resolve, reject) => {
           req.session.save((err) => {
@@ -1075,11 +1092,58 @@ export async function registerRoutes(
         role: user.role,
         avatar: user.avatar,
         isAdmin: user.id === 'ADMIN',
+        mustChangePassword: user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD,
       };
-      
+
       return res.json(userWithoutPassword);
     } catch (error) {
       console.error("Get user error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/change-password", async (req, res) => {
+    try {
+      if (!req.session?.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { currentPassword, newPassword } = req.body ?? {};
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current and new password are required" });
+      }
+
+      if (typeof newPassword !== "string" || newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+
+      if (newPassword === currentPassword) {
+        return res.status(400).json({ error: "New password must be different from current password" });
+      }
+
+      // Block reusing the well-known default for the admin account
+      if (req.session.userId === 'ADMIN' && newPassword === DEFAULT_ADMIN_PASSWORD) {
+        return res.status(400).json({ error: "New password must be different from the default password" });
+      }
+
+      const user = await storage.getUserById(req.session.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (user.password !== currentPassword) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const updated = await storage.updateUserPassword(user.id, newPassword);
+      if (!updated) {
+        return res.status(500).json({ error: "Failed to update password" });
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Change password error:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

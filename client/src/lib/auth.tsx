@@ -4,12 +4,19 @@ import type { User as SchemaUser } from "@shared/schema";
 
 interface User extends SchemaUser {
   isAdmin?: boolean;
+  mustChangePassword?: boolean;
+}
+
+interface ChangePasswordResult {
+  success: boolean;
+  error?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<ChangePasswordResult>;
   loading: boolean;
 }
 
@@ -29,26 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await fetch('/api/user', {
         credentials: 'include',
       });
-      
+
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
-      } else {
-        // In development, auto-login as admin for easier testing
-        console.log('Not authenticated, attempting auto-login...');
-        const autoLoginResponse = await fetch('/api/dev-login/admin', {
-          credentials: 'include',
-        });
-        if (autoLoginResponse.ok || autoLoginResponse.redirected) {
-          // Re-check auth after auto-login
-          const recheckResponse = await fetch('/api/user', {
-            credentials: 'include',
-          });
-          if (recheckResponse.ok) {
-            const userData = await recheckResponse.json();
-            setUser(userData);
-          }
-        }
       }
     } catch (error) {
       console.error('Auth check failed:', error);
@@ -71,22 +62,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       console.log('Response status:', response.status);
-      
+
       if (response.ok) {
         const userData = await response.json();
         console.log('Login successful:', userData);
         setUser(userData);
-        
+
         // Redirect based on user role or ID
         if (userData.id === 'ADMIN') {
           setLocation('/');
         } else {
           setLocation('/upload');
         }
-        
+
         return true;
       }
-      
+
       const errorData = await response.json();
       console.log('Login failed with response:', errorData);
       return false;
@@ -110,8 +101,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<ChangePasswordResult> => {
+    try {
+      const response = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        setUser((prev) => (prev ? { ...prev, mustChangePassword: false } : prev));
+        return { success: true };
+      }
+
+      const data = await response.json().catch(() => ({}));
+      return { success: false, error: data?.error || 'Failed to change password' };
+    } catch (error) {
+      console.error('Change password failed:', error);
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, changePassword, loading }}>
       {children}
     </AuthContext.Provider>
   );

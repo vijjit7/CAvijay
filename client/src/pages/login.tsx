@@ -4,9 +4,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Lock, User, Users } from "lucide-react";
+import { Lock, User, Users, ShieldCheck } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+const ADMIN_USERNAME = "admin";
 
 const quickLoginUsers = [
   { username: "admin", name: "Admin", avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80" },
@@ -25,11 +35,16 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
 
+  const [adminDialogOpen, setAdminDialogOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    
+
     if (!username || !password) {
       setError("Please enter both username and password");
       setLoading(false);
@@ -49,6 +64,13 @@ export default function LoginPage() {
   };
 
   const handleQuickLogin = async (selectedUsername: string) => {
+    if (selectedUsername === ADMIN_USERNAME) {
+      setAdminError("");
+      setAdminPassword("");
+      setAdminDialogOpen(true);
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
@@ -60,6 +82,31 @@ export default function LoginPage() {
       setError("Login failed. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAdminSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError("");
+
+    if (!adminPassword) {
+      setAdminError("Please enter the admin password.");
+      return;
+    }
+
+    setAdminLoading(true);
+    try {
+      const success = await login(ADMIN_USERNAME, adminPassword);
+      if (success) {
+        setAdminDialogOpen(false);
+        setAdminPassword("");
+      } else {
+        setAdminError("Invalid admin password.");
+      }
+    } catch (err) {
+      setAdminError("Login failed. Please try again.");
+    } finally {
+      setAdminLoading(false);
     }
   };
 
@@ -81,26 +128,34 @@ export default function LoginPage() {
               <Users className="h-5 w-5" />
               Quick Login
             </CardTitle>
-            <CardDescription>Click on a user to sign in instantly</CardDescription>
+            <CardDescription>Click on a user to sign in instantly. Admin requires a password.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3">
-              {quickLoginUsers.map((user) => (
-                <Button
-                  key={user.username}
-                  variant="outline"
-                  className="h-auto py-3 flex flex-col items-center gap-2 hover:bg-slate-50 hover:border-blue-400"
-                  onClick={() => handleQuickLogin(user.username)}
-                  disabled={loading}
-                  data-testid={`quick-login-${user.username}`}
-                >
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={user.avatar} alt={user.name} />
-                    <AvatarFallback>{user.name[0]}</AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm font-medium">{user.name}</span>
-                </Button>
-              ))}
+              {quickLoginUsers.map((user) => {
+                const isAdmin = user.username === ADMIN_USERNAME;
+                return (
+                  <Button
+                    key={user.username}
+                    variant="outline"
+                    className="h-auto py-3 flex flex-col items-center gap-2 hover:bg-slate-50 hover:border-blue-400 relative"
+                    onClick={() => handleQuickLogin(user.username)}
+                    disabled={loading}
+                    data-testid={`quick-login-${user.username}`}
+                  >
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={user.avatar} alt={user.name} />
+                      <AvatarFallback>{user.name[0]}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-medium">{user.name}</span>
+                    {isAdmin && (
+                      <span className="absolute top-1.5 right-1.5 text-blue-600">
+                        <ShieldCheck className="h-4 w-4" />
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -122,9 +177,9 @@ export default function LoginPage() {
                 <Label htmlFor="username">Username</Label>
                 <div className="relative">
                   <User className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                  <Input 
-                    id="username" 
-                    placeholder="e.g., bharat, narender, admin" 
+                  <Input
+                    id="username"
+                    placeholder="e.g., bharat, narender, admin"
                     className="pl-9"
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toLowerCase())}
@@ -136,17 +191,17 @@ export default function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                  <Input 
-                    id="password" 
-                    type="password" 
-                    placeholder="Enter password" 
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter password"
                     className="pl-9"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     data-testid="input-password"
                   />
                 </div>
-                <p className="text-xs text-slate-500">Hint: use "password123" for demo</p>
+                <p className="text-xs text-slate-500">Associates: "password123". Admin default: "password@123" (must be changed on first login).</p>
               </div>
             </CardContent>
             <CardFooter>
@@ -157,6 +212,57 @@ export default function LoginPage() {
           </form>
         </Card>
       </div>
+
+      <Dialog open={adminDialogOpen} onOpenChange={(open) => {
+        setAdminDialogOpen(open);
+        if (!open) {
+          setAdminPassword("");
+          setAdminError("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mx-auto h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center mb-2">
+              <ShieldCheck className="h-5 w-5 text-white" />
+            </div>
+            <DialogTitle className="text-center">Admin password required</DialogTitle>
+            <DialogDescription className="text-center">
+              Enter the admin password to continue. Default is <code className="font-mono">password@123</code> on first login.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAdminSubmit} className="space-y-4">
+            {adminError && (
+              <Alert variant="destructive">
+                <AlertDescription>{adminError}</AlertDescription>
+              </Alert>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="admin-password">Password</Label>
+              <Input
+                id="admin-password"
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                autoFocus
+                data-testid="input-admin-password"
+              />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAdminDialogOpen(false)}
+                disabled={adminLoading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={adminLoading} data-testid="button-admin-signin">
+                {adminLoading ? "Signing in..." : "Sign In"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

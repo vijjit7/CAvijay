@@ -15,6 +15,7 @@ import CreateReportPage from "@/pages/create-report";
 import AssociatesPage from "@/pages/associates";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuditProvider } from "@/lib/audit-context";
+import { ChangePasswordGate } from "@/components/change-password-gate";
 
 // Protected Route Wrapper
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -70,6 +71,7 @@ function App() {
           <TooltipProvider>
             <Toaster />
             <Router />
+            <ChangePasswordGate />
           </TooltipProvider>
         </AuditProvider>
       </AuthProvider>

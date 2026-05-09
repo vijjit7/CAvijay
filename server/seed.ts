@@ -5,7 +5,7 @@ const USERS = [
   {
     id: 'ADMIN',
     username: 'admin',
-    password: 'password123',
+    password: 'password@123',
     name: 'Admin',
     role: 'System Administrator',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80'
