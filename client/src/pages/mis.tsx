@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Upload, Trash2, Edit, ClipboardPaste, ExternalLink, Inbox, ChevronDown, Download, CalendarIcon } from "lucide-react";
+import { Plus, Upload, Trash2, Edit, ClipboardPaste, Inbox, ChevronDown, CalendarIcon } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -160,10 +160,6 @@ export default function MisPage() {
   const [filterInitiatedBy, setFilterInitiatedBy] = useState<string[]>([]);
   const [filterWorkNature, setFilterWorkNature] = useState<string[]>([]);
   
-  // Download states
-  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
-  const [downloadMonth, setDownloadMonth] = useState<string>("");
-  const [downloadYear, setDownloadYear] = useState<string>("");
 
   // Fetch centralized MIS (all entries from all associates)
   const { data: misEntries = [], isLoading } = useQuery<MisEntry[]>({
@@ -641,100 +637,6 @@ export default function MisPage() {
     return snoMap;
   }, [misEntries]);
 
-  const months = [
-    { value: "01", label: "January" },
-    { value: "02", label: "February" },
-    { value: "03", label: "March" },
-    { value: "04", label: "April" },
-    { value: "05", label: "May" },
-    { value: "06", label: "June" },
-    { value: "07", label: "July" },
-    { value: "08", label: "August" },
-    { value: "09", label: "September" },
-    { value: "10", label: "October" },
-    { value: "11", label: "November" },
-    { value: "12", label: "December" },
-  ];
-
-  const years = ["2025", "2026", "2027", "2028", "2029", "2030"];
-
-  const monthNameToNumber: { [key: string]: string } = {
-    "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
-    "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"
-  };
-
-  const handleDownload = () => {
-    if (!downloadMonth || !downloadYear) {
-      toast({ title: "Error", description: "Please select both month and year", variant: "destructive" });
-      return;
-    }
-
-    const monthLabel = months.find(m => m.value === downloadMonth)?.label || downloadMonth;
-    
-    const filteredForDownload = misEntries.filter(entry => {
-      if (!entry.inDate) return false;
-      const dateParts = entry.inDate.split(/[-/]/);
-      let entryMonth = "";
-      let entryYear = "";
-      
-      if (dateParts.length >= 3) {
-        const middlePart = dateParts[1].toLowerCase();
-        if (monthNameToNumber[middlePart.substring(0, 3)]) {
-          entryMonth = monthNameToNumber[middlePart.substring(0, 3)];
-          entryYear = dateParts[2].length === 4 ? dateParts[2] : "20" + dateParts[2];
-        } else if (dateParts[0].length === 4) {
-          entryYear = dateParts[0];
-          entryMonth = dateParts[1].padStart(2, "0");
-        } else if (dateParts[2].length === 4) {
-          entryYear = dateParts[2];
-          entryMonth = dateParts[1].padStart(2, "0");
-        } else if (dateParts[2].length === 2) {
-          entryYear = "20" + dateParts[2];
-          entryMonth = dateParts[1].padStart(2, "0");
-        }
-      }
-      
-      return entryMonth === downloadMonth && entryYear === downloadYear;
-    });
-
-    if (filteredForDownload.length === 0) {
-      toast({ title: "No Data", description: `No entries found for ${monthLabel} ${downloadYear}`, variant: "destructive" });
-      return;
-    }
-
-    const headers = ["SNO", "Lead ID", "Applicant", "Business", "Phone", "Address", "Branch", "In Date", "Out Date", "Work Nature", "Initiated By", "PD Person", "Status"];
-    
-    const csvRows = [headers.join(",")];
-    filteredForDownload.forEach((entry, index) => {
-      const row = [
-        index + 1,
-        `"${entry.leadId}"`,
-        `"${entry.customerName}"`,
-        `"${entry.businessName || ""}"`,
-        `"${entry.contactDetails || ""}"`,
-        `"${(entry.customerAddress || "").replace(/"/g, '""')}"`,
-        `"${entry.location || ""}"`,
-        `"${formatMisDate(entry.inDate) === "-" ? "" : formatMisDate(entry.inDate)}"`,
-        `"${formatMisDate(entry.outDate) === "-" ? "" : formatMisDate(entry.outDate)}"`,
-        `"${(entry as any).workNature || ""}"`,
-        `"${entry.initiatedPerson || ""}"`,
-        `"${getAssociateName(entry.pdPersonId)}"`,
-        `"${entry.status || ""}"`,
-      ];
-      csvRows.push(row.join(","));
-    });
-
-    const csvContent = csvRows.join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `MIS_${monthLabel}_${downloadYear}.csv`;
-    link.click();
-    
-    toast({ title: "Success", description: `Downloaded ${filteredForDownload.length} entries for ${monthLabel} ${downloadYear}` });
-    setDownloadDialogOpen(false);
-  };
-
   return (
     <AuditLayout>
       <div className="space-y-6">
@@ -744,66 +646,6 @@ export default function MisPage() {
             <p className="text-slate-500">Track your assigned work from email allocations</p>
           </div>
           <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              className="gap-2" 
-              data-testid="button-view-mis"
-              onClick={() => document.getElementById('mis-table')?.scrollIntoView({ behavior: 'smooth' })}
-            >
-              <ExternalLink className="h-4 w-4" />
-              View MIS ({misEntries.length})
-            </Button>
-            <Dialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="gap-2" data-testid="button-download-mis">
-                  <Download className="h-4 w-4" />
-                  Download
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Download MIS Data</DialogTitle>
-                  <DialogDescription>
-                    Select month and year to download MIS entries. SNO will start from 1 for the selected month.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Month</label>
-                    <Select value={downloadMonth} onValueChange={setDownloadMonth}>
-                      <SelectTrigger data-testid="select-download-month">
-                        <SelectValue placeholder="Select month" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {months.map(month => (
-                          <SelectItem key={month.value} value={month.value}>{month.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Year</label>
-                    <Select value={downloadYear} onValueChange={setDownloadYear}>
-                      <SelectTrigger data-testid="select-download-year">
-                        <SelectValue placeholder="Select year" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {years.map(year => (
-                          <SelectItem key={year} value={year}>{year}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setDownloadDialogOpen(false)}>Cancel</Button>
-                  <Button onClick={handleDownload} data-testid="button-confirm-download">
-                    <Download className="h-4 w-4 mr-2" />
-                    Download CSV
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
             <Dialog open={pasteDialogOpen} onOpenChange={setPasteDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2" data-testid="button-paste-data">
