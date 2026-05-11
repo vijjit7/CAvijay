@@ -3881,8 +3881,22 @@ showpage
   app.patch("/api/mis/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updates = req.body;
-      
+      const updates = { ...req.body };
+
+      // PD Person, In/Out Date and Status are admin-only on work allocation entries
+      const isAdmin = req.session?.userId === 'ADMIN';
+      if (!isAdmin) {
+        delete updates.pdPerson;
+        delete updates.pdPersonId;
+        delete updates.pdTyping;
+        delete updates.pdTypingId;
+        delete updates.inDate;
+        delete updates.outDate;
+        delete updates.status;
+        delete updates.workflowStatus;
+        delete updates.assignedAt;
+      }
+
       // If pdPersonId is being set, also set assignedAt
       if (updates.pdPersonId && updates.workflowStatus === 'assigned') {
         updates.assignedAt = new Date();

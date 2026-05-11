@@ -476,8 +476,35 @@ export default function MisPage() {
     }
   };
 
+  // Associates only see current-month entries; admin sees everything.
+  // Match by inDate falling in the current calendar month.
+  const now = new Date();
+  const curMonth = now.getMonth();
+  const curYear = now.getFullYear();
+  const monthAbbrev: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  const isInCurrentMonth = (dateStr: string | null): boolean => {
+    if (!dateStr) return false;
+    const t = dateStr.trim();
+    let m = t.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+    if (m) return parseInt(m[2]) - 1 === curMonth && parseInt(m[3]) === curYear;
+    m = t.match(/^(\d{1,2})[-\/]([A-Za-z]{3,})[-\/](\d{4})/);
+    if (m) {
+      const mi = monthAbbrev[m[2].toLowerCase().substring(0, 3)];
+      return mi === curMonth && parseInt(m[3]) === curYear;
+    }
+    m = t.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (m) return parseInt(m[2]) - 1 === curMonth && parseInt(m[1]) === curYear;
+    const d = new Date(t);
+    return !isNaN(d.getTime()) && d.getMonth() === curMonth && d.getFullYear() === curYear;
+  };
+
   // Filtered MIS entries based on filter states (now arrays)
   const filteredMisEntries = misEntries.filter(entry => {
+    // Non-admins are restricted to the current month
+    if (!user?.isAdmin && !isInCurrentMonth(entry.inDate)) {
+      return false;
+    }
+
     // Search filter - matches Lead ID or Applicant Name
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
@@ -487,7 +514,7 @@ export default function MisPage() {
         return false;
       }
     }
-    
+
     if (filterLeadId.length > 0 && !filterLeadId.includes(entry.leadId)) {
       return false;
     }
@@ -1299,7 +1326,9 @@ export default function MisPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">In Date</label>
+                  <label className="text-sm font-medium">
+                    In Date{!user?.isAdmin && <span className="ml-1 text-xs text-slate-500">(admin only)</span>}
+                  </label>
                   <div className="flex items-center gap-1">
                     <Input
                       value={editEntry.inDate ? formatMisDate(editEntry.inDate) : ""}
@@ -1310,7 +1339,7 @@ export default function MisPage() {
                     />
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" size="icon" className="shrink-0" data-testid="calendar-edit-inDate">
+                        <Button variant="outline" size="icon" className="shrink-0" disabled={!user?.isAdmin} data-testid="calendar-edit-inDate">
                           <CalendarIcon className="h-4 w-4" />
                         </Button>
                       </PopoverTrigger>
@@ -1333,7 +1362,9 @@ export default function MisPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Out Date</label>
+                  <label className="text-sm font-medium">
+                    Out Date{!user?.isAdmin && <span className="ml-1 text-xs text-slate-500">(admin only)</span>}
+                  </label>
                   <div className="flex items-center gap-1">
                     <Input
                       value={editEntry.outDate ? formatMisDate(editEntry.outDate) : ""}
@@ -1344,7 +1375,7 @@ export default function MisPage() {
                     />
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" size="icon" className="shrink-0" data-testid="calendar-edit-outDate">
+                        <Button variant="outline" size="icon" className="shrink-0" disabled={!user?.isAdmin} data-testid="calendar-edit-outDate">
                           <CalendarIcon className="h-4 w-4" />
                         </Button>
                       </PopoverTrigger>
@@ -1364,7 +1395,7 @@ export default function MisPage() {
                         />
                       </PopoverContent>
                     </Popover>
-                    {editEntry.outDate && (
+                    {editEntry.outDate && user?.isAdmin && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -1394,14 +1425,17 @@ export default function MisPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">PD Person</label>
+                  <label className="text-sm font-medium">
+                    PD Person{!user?.isAdmin && <span className="ml-1 text-xs text-slate-500">(admin only)</span>}
+                  </label>
                   <Select
                     value={editEntry.pdPersonId || "unassigned"}
+                    disabled={!user?.isAdmin}
                     onValueChange={(value) => {
                       const pdPersonId = value === "unassigned" ? null : value;
                       const associate = associates.find(a => a.id === value);
-                      setEditEntry({ 
-                        ...editEntry, 
+                      setEditEntry({
+                        ...editEntry,
                         pdPersonId,
                         pdPerson: associate?.name || null,
                         workflowStatus: pdPersonId ? "assigned" : "unassigned"
@@ -1430,9 +1464,12 @@ export default function MisPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Status</label>
+                  <label className="text-sm font-medium">
+                    Status{!user?.isAdmin && <span className="ml-1 text-xs text-slate-500">(admin only)</span>}
+                  </label>
                   <Select
                     value={editEntry.status || "Pending"}
+                    disabled={!user?.isAdmin}
                     onValueChange={(value) => {
                       const updatedEntry = { ...editEntry, status: value };
                       // Auto-remove from intray when completed or cancelled
