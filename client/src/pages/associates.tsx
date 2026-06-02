@@ -29,6 +29,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { VERIFICATION_ASSOCIATE_ROLE, OFFICE_ASSOCIATE_ROLE } from "@shared/schema";
 
 export default function AssociatesPage() {
   const { associates } = useAudit();
@@ -40,6 +48,7 @@ export default function AssociatesPage() {
     name: '',
     username: '',
     password: '',
+    role: VERIFICATION_ASSOCIATE_ROLE,
   });
   const { toast } = useToast();
 
@@ -110,7 +119,7 @@ export default function AssociatesPage() {
           description: `${newAssociate.name} has been added successfully.`,
         });
         setIsAddOpen(false);
-        setNewAssociate({ name: '', username: '', password: '' });
+        setNewAssociate({ name: '', username: '', password: '', role: VERIFICATION_ASSOCIATE_ROLE });
         window.location.reload();
       } else {
         const error = await response.json();
@@ -154,10 +163,30 @@ export default function AssociatesPage() {
                 <DialogHeader>
                   <DialogTitle>Add New Associate</DialogTitle>
                   <DialogDescription>
-                    Create a new verification officer account.
+                    Choose the associate type. Verification associates get full AuditGuard
+                    access; office associates can only claim bills.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="associate-type">Associate Type</Label>
+                    <Select
+                      value={newAssociate.role}
+                      onValueChange={(v) => setNewAssociate(prev => ({ ...prev, role: v }))}
+                    >
+                      <SelectTrigger id="associate-type" data-testid="select-associate-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={VERIFICATION_ASSOCIATE_ROLE}>
+                          Verification associate — full AuditGuard access
+                        </SelectItem>
+                        <SelectItem value={OFFICE_ASSOCIATE_ROLE}>
+                          Office associate — bill claiming only
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
                     <Input

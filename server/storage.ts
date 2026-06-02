@@ -40,8 +40,20 @@ function loadDevUserOverrides() {
     const overrides = JSON.parse(raw) as Array<Partial<User> & { id: string }>;
     for (const o of overrides) {
       const target = DEFAULT_USERS.find(u => u.id === o.id);
-      if (target && typeof o.password === 'string') {
-        target.password = o.password;
+      if (target) {
+        if (typeof o.password === 'string') target.password = o.password;
+        if (typeof o.role === 'string') target.role = o.role;
+      } else if (o.id && o.username && o.name) {
+        // A dev-created associate that isn't one of the built-in defaults —
+        // re-add it so it survives restarts.
+        DEFAULT_USERS.push({
+          id: o.id,
+          username: o.username,
+          password: typeof o.password === 'string' ? o.password : '',
+          name: o.name,
+          role: o.role ?? 'Verification Officer',
+          avatar: o.avatar ?? '',
+        });
       }
     }
     console.log(`[Storage] Loaded ${overrides.length} dev-user overrides from ${DEV_USERS_FILE}`);
@@ -284,11 +296,34 @@ export class PostgresStorage implements IStorage {
   }
 
   async createUser(user: InsertUser): Promise<User> {
+    // Fallback to in-memory users when database is not available. The caller
+    // supplies the id (e.g. "A8"), so it is present on the object at runtime.
+    if (!this.hasDatabase) {
+      const u = user as User;
+      const created: User = {
+        id: u.id,
+        username: u.username,
+        password: u.password,
+        name: u.name,
+        role: u.role,
+        avatar: u.avatar ?? '',
+      };
+      DEFAULT_USERS.push(created);
+      saveDevUserOverrides();
+      return created;
+    }
     const result = await this.db.insert(users).values(user).returning();
     return result[0];
   }
 
   async deleteUser(id: string): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const idx = DEFAULT_USERS.findIndex(u => u.id === id);
+      if (idx === -1) return false;
+      DEFAULT_USERS.splice(idx, 1);
+      saveDevUserOverrides();
+      return true;
+    }
     const result = await this.db.delete(users).where(eq(users.id, id));
     return (result.rowCount ?? 0) > 0;
   }

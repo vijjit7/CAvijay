@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -21,11 +21,19 @@ import ReceiptsAndPaymentsBreakdownPage from "@/pages/receipts-and-payments-brea
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuditProvider } from "@/lib/audit-context";
 import { ChangePasswordGate } from "@/components/change-password-gate";
+import { isOfficeAssociate } from "@shared/schema";
+
+// Office associates may only claim bills — confine them to /bill.
+const OFFICE_ASSOCIATE_ALLOWED = new Set(["/bill"]);
 
 // Protected Route Wrapper
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user } = useAuth();
+  const [location] = useLocation();
   if (!user) return <Redirect to="/login" />;
+  if (isOfficeAssociate(user) && !OFFICE_ASSOCIATE_ALLOWED.has(location)) {
+    return <Redirect to="/bill" />;
+  }
   return <Component />;
 }
 

@@ -248,6 +248,15 @@ export type User = typeof users.$inferSelect;
 export type InsertReport = z.infer<typeof insertReportSchema>;
 export type Report = typeof reports.$inferSelect;
 
+// Associate sub-types, stored in the user's `role`:
+//  - Verification associates get the full AuditGuard access (reports, MIS, etc.)
+//  - Office associates can only claim bills (the office-costing Bill page).
+export const VERIFICATION_ASSOCIATE_ROLE = 'Verification Officer';
+export const OFFICE_ASSOCIATE_ROLE = 'Office Associate';
+export function isOfficeAssociate(user: { id?: string; role?: string | null } | null | undefined): boolean {
+  return !!user && user.id !== 'ADMIN' && user.id !== 'PROP' && user.role === OFFICE_ASSOCIATE_ROLE;
+}
+
 // MIS (Management Information System) table for tracking work allocations
 export const misEntries = pgTable("mis_entries", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),

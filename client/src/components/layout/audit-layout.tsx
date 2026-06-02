@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { isOfficeAssociate } from "@shared/schema";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
 
@@ -67,6 +68,11 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
     { icon: Receipt, label: "Bill", path: "/bill" },
   ];
 
+  // Office associates can only claim bills.
+  const officeAssociateNavItems = [
+    { icon: Receipt, label: "Bill", path: "/bill" },
+  ];
+
   const proprietorNavItems = [
     { icon: Wallet, label: "Office Costing", path: "/office-costing" },
     { icon: Landmark, label: "Receipts & Payments", path: "/receipts-and-payments" },
@@ -75,6 +81,7 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
   const navItems =
     user.id === 'PROP' ? proprietorNavItems :
     user.isAdmin ? adminNavItems :
+    isOfficeAssociate(user) ? officeAssociateNavItems :
     associateNavItems;
 
   const SidebarContent = () => (

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { User as SchemaUser } from "@shared/schema";
+import { isOfficeAssociate } from "@shared/schema";
 
 interface User extends SchemaUser {
   isAdmin?: boolean;
@@ -74,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLocation('/');
         } else if (userData.id === 'PROP') {
           setLocation('/office-costing');
+        } else if (isOfficeAssociate(userData)) {
+          setLocation('/bill');
         } else {
           setLocation('/upload');
         }
