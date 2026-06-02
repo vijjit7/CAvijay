@@ -4,7 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { pool } from "./db";
+import { pool, ensureSchema } from "./db";
 
 // Server version for debugging deployments
 const SERVER_VERSION = "V7_20260211_LISTEN_FIRST";
@@ -146,6 +146,14 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // Ensure newer tables exist before routes that touch them run. Non-fatal:
+  // if it fails, health checks still respond and the error is logged.
+  try {
+    await ensureSchema();
+  } catch (err) {
+    console.error('[SERVER] ensureSchema failed (non-fatal):', err);
+  }
 
   // Register routes (may have some async DB operations that should not block startup)
   await registerRoutes(httpServer, app);

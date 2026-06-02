@@ -44,3 +44,57 @@ export function requireDb() {
   }
   return db;
 }
+
+// Create the application tables if they are missing. The project manages its
+// schema with `drizzle-kit push` (no migration files), so when new tables are
+// added to shared/schema.ts they only reach production if someone re-runs the
+// push. This idempotent guard creates the newer tables on startup so a deploy
+// can never end up with the schema out of sync (mirrors the session table's
+// createTableIfMissing). CREATE TABLE IF NOT EXISTS is a no-op when the table
+// already exists, so it is safe to run on every boot.
+export async function ensureSchema(): Promise<void> {
+  if (!pool) return;
+  const ddl = `
+    CREATE TABLE IF NOT EXISTS expenses (
+      id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      user_id varchar(10) NOT NULL REFERENCES users(id),
+      date text NOT NULL,
+      category text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      amount numeric(12,2) NOT NULL,
+      approver_id varchar(10) NOT NULL REFERENCES users(id),
+      bill_file_url text,
+      status text NOT NULL DEFAULT 'pending',
+      approved_at timestamp,
+      paid_at timestamp,
+      rejection_reason text,
+      is_own_cost boolean NOT NULL DEFAULT false,
+      created_at timestamp NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS bank_statements (
+      id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      bank_name text NOT NULL,
+      account_number text,
+      month text NOT NULL,
+      opening_balance numeric(14,2) NOT NULL,
+      closing_balance numeric(14,2) NOT NULL,
+      source_file_url text,
+      uploaded_by varchar(10) NOT NULL REFERENCES users(id),
+      created_at timestamp NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS bank_transactions (
+      id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      statement_id integer NOT NULL REFERENCES bank_statements(id) ON DELETE CASCADE,
+      date text NOT NULL,
+      narration text NOT NULL DEFAULT '',
+      debit numeric(14,2),
+      credit numeric(14,2),
+      balance numeric(14,2),
+      category text NOT NULL DEFAULT 'Unclassified',
+      comment text NOT NULL DEFAULT '',
+      row_index integer NOT NULL DEFAULT 0
+    );
+  `;
+  await pool.query(ddl);
+  console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions verified');
+}
