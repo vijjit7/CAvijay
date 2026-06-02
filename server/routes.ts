@@ -4553,20 +4553,35 @@ showpage
     const found = findHeaderRow();
     if (!found) return { accountNumber: null, openingBalance: null, closingBalance: null, transactions: [] };
 
-    // Try to find an "Account Number" / "A/c No." cell in the header block above the table,
-    // then take the first non-empty cell to its right as the value. Strip currency/holder name
-    // qualifiers — keep only the digit run (ICICI: "007801520178 ( INR )  - VIJAY KUMAR T").
+    // Find an "Account Number" / "A/c No." value in the header block above the table.
+    // Two layouts are supported:
+    //  1. Label and value in the SAME cell — HDFC: "Account No :05451540035399   CLASSIC ON PHONE".
+    //  2. Label in its own cell, value in a cell to its right — ICICI/Federal/Indian Bank
+    //     (e.g. "A/c No." | "007801520178 ( INR )  - VIJAY KUMAR T"). Keep only the digit run.
     function findAccountNumber(headerIdx: number): string | null {
-      const label = /^\s*(account\s*(no\.?|number|num)|a\/c\s*(no\.?|number))\s*[:.]?\s*$/i;
+      // The "account no" / "a/c no" label immediately followed by the digit run, all in one cell.
+      const inlineLabelValue = /(?:account\s*(?:no\.?|number|num)|a\/c\s*(?:no\.?|number))\s*[:.]?\s*(\d[\d\s-]{4,})/i;
+      // A cell that is ONLY the label (value lives in a neighbouring cell to the right).
+      const labelOnly = /^\s*(account\s*(no\.?|number|num)|a\/c\s*(no\.?|number))\s*[:.]?\s*$/i;
       for (let i = 0; i < headerIdx; i++) {
         const cells = (rows[i] || []).map(c => String(c ?? '').trim());
         for (let c = 0; c < cells.length; c++) {
-          if (!label.test(cells[c])) continue;
-          for (let cc = c + 1; cc < cells.length; cc++) {
-            const v = cells[cc];
-            if (!v) continue;
-            const m = v.match(/\d{6,}/);
-            return m ? m[0] : v;
+          const cell = cells[c];
+          if (!cell) continue;
+          // Layout 1: label + value in the same cell.
+          const inline = cell.match(inlineLabelValue);
+          if (inline) {
+            const digits = inline[1].replace(/\D/g, '');
+            if (digits.length >= 6 && digits.length <= 20) return digits;
+          }
+          // Layout 2: label-only cell, value to the right.
+          if (labelOnly.test(cell)) {
+            for (let cc = c + 1; cc < cells.length; cc++) {
+              const v = cells[cc];
+              if (!v) continue;
+              const m = v.match(/\d{6,}/);
+              return m ? m[0] : v;
+            }
           }
         }
       }

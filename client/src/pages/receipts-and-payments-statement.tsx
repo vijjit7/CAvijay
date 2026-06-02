@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, Printer, Landmark, Lightbulb, TrendingUp, TrendingDown, AlertTriangle, Info } from "lucide-react";
 import { useLocation } from "wouter";
 import type { BankStatement, BankTransaction } from "@shared/schema";
+import { dedupeTransactions } from "@/lib/txn-dedup";
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt = (n: number) => inr.format(n);
@@ -121,7 +122,9 @@ export default function ReceiptsAndPaymentsStatementPage() {
     let closingTotal = 0;
 
     for (const [, group] of byKey) {
-      const sorted = [...group.txns].sort(cmp);
+      // Drop duplicate rows within the account before deriving opening/closing
+      // (the same statement re-uploaded would otherwise appear twice).
+      const sorted = dedupeTransactions([...group.txns].sort(cmp));
       const monthTxns = sorted.filter(t => isInMonth(t.date));
       const hasMonthStmt = group.stmtsForMonth.length > 0;
       if (monthTxns.length === 0 && !hasMonthStmt) continue;
@@ -151,17 +154,21 @@ export default function ReceiptsAndPaymentsStatementPage() {
       closingTotal += closing;
     }
 
+    // Category totals are summed from a globally de-duplicated transaction set
+    // so a row imported in two statements is counted once.
+    const allTxns: EnrichedTxn[] = [];
+    for (const [, group] of byKey) allTxns.push(...group.txns);
+    const dedupedTxns = dedupeTransactions(allTxns);
+
     const creditsByCat: Record<string, number> = {};
     const debitsByCat: Record<string, number> = {};
-    for (const [, group] of byKey) {
-      for (const t of group.txns) {
-        if (!isInMonth(t.date)) continue;
-        const cat = t.category || "Unclassified";
-        const cr = toNum(t.credit);
-        const db = toNum(t.debit);
-        if (cr > 0) creditsByCat[cat] = (creditsByCat[cat] || 0) + cr;
-        if (db > 0) debitsByCat[cat] = (debitsByCat[cat] || 0) + db;
-      }
+    for (const t of dedupedTxns) {
+      if (!isInMonth(t.date)) continue;
+      const cat = t.category || "Unclassified";
+      const cr = toNum(t.credit);
+      const db = toNum(t.debit);
+      if (cr > 0) creditsByCat[cat] = (creditsByCat[cat] || 0) + cr;
+      if (db > 0) debitsByCat[cat] = (debitsByCat[cat] || 0) + db;
     }
 
     const hasData = openingByBank.length > 0 || Object.keys(creditsByCat).length > 0 || Object.keys(debitsByCat).length > 0;
@@ -197,9 +204,11 @@ export default function ReceiptsAndPaymentsStatementPage() {
     type Agg = { credits: number; debits: number; opExpense: number; opIncome: number; byCatCredit: Record<string, number>; byCatDebit: Record<string, number>; unclassified: number };
     const blank = (): Agg => ({ credits: 0, debits: 0, opExpense: 0, opIncome: 0, byCatCredit: {}, byCatDebit: {}, unclassified: 0 });
     const byMonth = new Map<string, Agg>();
-    for (const s of statements) {
-      const list = txnsByStmt[s.id] || [];
-      for (const t of list) {
+    // De-duplicate across all statements so trend comparisons aren't skewed by
+    // the same statement imported under more than one month.
+    const allTxns = dedupeTransactions(statements.flatMap(s => txnsByStmt[s.id] || []));
+    {
+      for (const t of allTxns) {
         const m = (t.date || '').slice(0, 7);
         if (!/^\d{4}-\d{2}$/.test(m)) continue;
         if (!byMonth.has(m)) byMonth.set(m, blank());

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, Printer, Landmark } from "lucide-react";
 import { useLocation } from "wouter";
 import type { BankStatement, BankTransaction } from "@shared/schema";
+import { dedupeTransactions } from "@/lib/txn-dedup";
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt = (n: number) => inr.format(n);
@@ -90,24 +91,30 @@ export default function ReceiptsAndPaymentsBreakdownPage() {
   const { items, total } = useMemo(() => {
     const monthPrefix = month ? `${month}-` : "";
     const isInMonth = (d: string) => !!monthPrefix && d.startsWith(monthPrefix);
+    // Flatten every statement's transactions, then drop duplicates across
+    // statements (e.g. the same running statement uploaded under two months)
+    // so a transaction is never listed twice.
+    const flat = statements.flatMap(s =>
+      (txnsByStmt[s.id] || []).map(t => ({ t, bankName: s.bankName, account: s.accountNumber || null })),
+    );
+    const deduped = dedupeTransactions(flat.map(f => f.t));
+    const metaByKey = new Map(flat.map(f => [f.t.id, f]));
     const out: Item[] = [];
-    for (const s of statements) {
-      const list = txnsByStmt[s.id] || [];
-      for (const t of list) {
-        if (!isInMonth(t.date)) continue;
-        const cat = t.category || "Unclassified";
-        if (cat !== category) continue;
-        const amt = kind === "receipts" ? toNum(t.credit) : toNum(t.debit);
-        if (amt <= 0) continue;
-        out.push({
-          txnId: t.id,
-          date: t.date,
-          bankName: s.bankName,
-          account: s.accountNumber || null,
-          narration: t.narration,
-          amount: amt,
-        });
-      }
+    for (const t of deduped) {
+      if (!isInMonth(t.date)) continue;
+      const cat = t.category || "Unclassified";
+      if (cat !== category) continue;
+      const amt = kind === "receipts" ? toNum(t.credit) : toNum(t.debit);
+      if (amt <= 0) continue;
+      const meta = metaByKey.get(t.id);
+      out.push({
+        txnId: t.id,
+        date: t.date,
+        bankName: meta?.bankName ?? "",
+        account: meta?.account ?? null,
+        narration: t.narration,
+        amount: amt,
+      });
     }
     out.sort((a, b) => a.date.localeCompare(b.date) || a.bankName.localeCompare(b.bankName) || a.txnId - b.txnId);
     const total = out.reduce((s, r) => s + r.amount, 0);
