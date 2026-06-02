@@ -236,16 +236,59 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
   const [purging, setPurging] = useState(false);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [downloadingMis, setDownloadingMis] = useState(false);
+  const [misDialogOpen, setMisDialogOpen] = useState(false);
+  const [misMonth, setMisMonth] = useState("");
+  const [misYear, setMisYear] = useState("");
+
+  const MIS_MONTHS = [
+    { value: "01", label: "January" }, { value: "02", label: "February" },
+    { value: "03", label: "March" }, { value: "04", label: "April" },
+    { value: "05", label: "May" }, { value: "06", label: "June" },
+    { value: "07", label: "July" }, { value: "08", label: "August" },
+    { value: "09", label: "September" }, { value: "10", label: "October" },
+    { value: "11", label: "November" }, { value: "12", label: "December" },
+  ];
+  const MIS_YEARS = ["2025", "2026", "2027", "2028", "2029", "2030"];
+  const MONTH_NAME_TO_NUM: Record<string, string> = {
+    jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+    jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+  };
+
+  // Derive {month: "MM", year: "YYYY"} from a MIS inDate that may arrive in
+  // several formats (DD-MMM-YYYY, YYYY-MM-DD, DD/MM/YYYY, DD-MM-YY, ...).
+  const monthYearOf = (inDate: string | null): { month: string; year: string } => {
+    if (!inDate) return { month: "", year: "" };
+    const parts = inDate.split(/[-/]/);
+    if (parts.length < 3) return { month: "", year: "" };
+    const mid = parts[1].toLowerCase().substring(0, 3);
+    if (MONTH_NAME_TO_NUM[mid]) {
+      return { month: MONTH_NAME_TO_NUM[mid], year: parts[2].length === 4 ? parts[2] : "20" + parts[2] };
+    }
+    if (parts[0].length === 4) return { year: parts[0], month: parts[1].padStart(2, "0") };
+    if (parts[2].length === 4) return { year: parts[2], month: parts[1].padStart(2, "0") };
+    if (parts[2].length === 2) return { year: "20" + parts[2], month: parts[1].padStart(2, "0") };
+    return { month: "", year: "" };
+  };
 
   const handleDownloadMis = async () => {
+    if (!misMonth || !misYear) {
+      toast({ title: "Select a period", description: "Please choose both month and year.", variant: "destructive" });
+      return;
+    }
     setDownloadingMis(true);
     try {
       const response = await fetch('/api/mis', { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch MIS entries');
-      const entries: any[] = await response.json();
+      const all: any[] = await response.json();
+
+      const monthLabel = MIS_MONTHS.find(m => m.value === misMonth)?.label || misMonth;
+      const entries = all.filter(e => {
+        const { month, year } = monthYearOf(e.inDate);
+        return month === misMonth && year === misYear;
+      });
 
       if (!entries.length) {
-        toast({ title: "No Data", description: "There are no MIS entries to download.", variant: "destructive" });
+        toast({ title: "No Data", description: `No MIS entries found for ${monthLabel} ${misYear}.`, variant: "destructive" });
         return;
       }
 
@@ -277,13 +320,14 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `auditguard-mis-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `auditguard-mis-${misYear}-${misMonth}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
 
-      toast({ title: "MIS Downloaded", description: `${entries.length} MIS entries exported as CSV.` });
+      toast({ title: "MIS Downloaded", description: `${entries.length} MIS entries for ${monthLabel} ${misYear} exported as CSV.` });
+      setMisDialogOpen(false);
     } catch (error: any) {
       toast({ title: "Download Failed", description: error.message, variant: "destructive" });
     } finally {
@@ -543,12 +587,11 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
              </Button>
              <Button
                variant="outline"
-               onClick={handleDownloadMis}
-               disabled={downloadingMis}
+               onClick={() => setMisDialogOpen(true)}
                data-testid="button-download-mis"
              >
                <Download className="h-4 w-4 mr-2" />
-               {downloadingMis ? 'Downloading...' : 'Download MIS'}
+               Download MIS
              </Button>
              <Button
                variant="outline"
@@ -788,6 +831,56 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
           </CardContent>
         </Card>
       </div>
+
+      {/* Download MIS — select period */}
+      <Dialog open={misDialogOpen} onOpenChange={setMisDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Download MIS
+            </DialogTitle>
+            <DialogDescription>
+              Select the month and year to export MIS entries for that period.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Month</label>
+              <Select value={misMonth} onValueChange={setMisMonth}>
+                <SelectTrigger data-testid="select-mis-month">
+                  <SelectValue placeholder="Select month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MIS_MONTHS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Year</label>
+              <Select value={misYear} onValueChange={setMisYear}>
+                <SelectTrigger data-testid="select-mis-year">
+                  <SelectValue placeholder="Select year" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MIS_YEARS.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMisDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleDownloadMis}
+              disabled={downloadingMis || !misMonth || !misYear}
+              data-testid="button-confirm-download-mis"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {downloadingMis ? 'Downloading...' : 'Download CSV'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Purge PDF Content Confirmation Dialog */}
       <Dialog open={purgeDialogOpen} onOpenChange={setPurgeDialogOpen}>
