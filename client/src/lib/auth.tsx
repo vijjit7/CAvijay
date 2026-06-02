@@ -4,6 +4,7 @@ import type { User as SchemaUser } from "@shared/schema";
 
 interface User extends SchemaUser {
   isAdmin?: boolean;
+  isApprover?: boolean;
   mustChangePassword?: boolean;
 }
 
@@ -71,6 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Redirect based on user role or ID
         if (userData.id === 'ADMIN') {
           setLocation('/');
+        } else if (userData.id === 'PROP') {
+          setLocation('/office-costing');
         } else {
           setLocation('/upload');
         }

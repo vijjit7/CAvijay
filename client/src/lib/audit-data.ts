@@ -52,7 +52,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A1',
     name: 'Bharat',
     role: 'Senior Field Auditor',
-    avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80',
+    avatar: '',
     totalReports: 142,
     avgScore: 94
   },
@@ -60,7 +60,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A2',
     name: 'Narender',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80',
+    avatar: '',
     totalReports: 89,
     avgScore: 88
   },
@@ -68,7 +68,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A3',
     name: 'Upender',
     role: 'Risk Analyst',
-    avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80',
+    avatar: '',
     totalReports: 78,
     avgScore: 82
   },
@@ -76,7 +76,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A4',
     name: 'Avinash',
     role: 'Compliance Specialist',
-    avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80',
+    avatar: '',
     totalReports: 156,
     avgScore: 91
   },
@@ -84,7 +84,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A5',
     name: 'Prashanth',
     role: 'Audit Manager',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80',
+    avatar: '',
     totalReports: 65,
     avgScore: 85
   },
@@ -92,7 +92,7 @@ export const ASSOCIATES: Associate[] = [
     id: 'A7',
     name: 'Nikhil',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&q=80',
+    avatar: '',
     totalReports: 0,
     avgScore: 0
   }

@@ -1,15 +1,17 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertReportSchema, type ReportTAT, users } from "@shared/schema";
+import { insertReportSchema, type ReportTAT, users, EXPENSE_CATEGORIES, type ExpenseStatus, BANK_TXN_CATEGORIES } from "@shared/schema";
+import XLSX from "xlsx";
 import { randomBytes } from "crypto";
 import multer from "multer";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { writeFile, readFile, unlink } from "fs/promises";
+import { mkdirSync, existsSync, createReadStream } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, extname } from "path";
 import dns from "dns";
 import net from "net";
 import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail, importWorkAllocationEmails } from "./gmail";
@@ -26,14 +28,15 @@ const DEFAULT_ADMIN_PASSWORD = 'password@123';
 const LEGACY_ADMIN_PASSWORD = 'password123';
 
 const DEFAULT_USERS = [
-  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
-  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
-  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
-  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
-  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80' },
-  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80' },
-  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' },
-  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&q=80' }
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '' },
+  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '' },
+  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '' },
+  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '' },
+  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '' },
+  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '' },
+  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '' },
+  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '' },
+  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '' }
 ];
 
 async function ensureUsersExist() {
@@ -117,9 +120,30 @@ declare module 'express-session' {
 
 const execAsync = promisify(exec);
 
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
+
+// Bill uploads (office costing) — written to disk under uploads/bills/
+const BILLS_DIR = join(process.cwd(), "uploads", "bills");
+if (!existsSync(BILLS_DIR)) mkdirSync(BILLS_DIR, { recursive: true });
+
+const billUpload = multer({
+  storage: multer.diskStorage({
+    destination: BILLS_DIR,
+    filename: (_req, file, cb) => {
+      const ext = extname(file.originalname).toLowerCase() || '.bin';
+      const stamp = Date.now().toString(36) + '-' + randomBytes(4).toString('hex');
+      cb(null, `bill-${stamp}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (_req, file, cb) => {
+    const ok = ['image/jpeg', 'image/png', 'application/pdf'].includes(file.mimetype);
+    if (!ok) return cb(new Error('Only jpg, png, or pdf bills allowed'));
+    cb(null, true);
+  },
 });
 
 async function parsePdf(buffer: Buffer): Promise<string> {
@@ -1001,13 +1025,13 @@ export async function registerRoutes(
         console.error("Database error looking up user:", dbError);
         // Fallback to default users if database fails
         const DEFAULT_USERS = [
-          { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
-          { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
-          { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
-          { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
-          { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80' },
-          { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80' },
-          { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' }
+          { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '' },
+          { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '' },
+          { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '' },
+          { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '' },
+          { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '' },
+          { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '' },
+          { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '' }
         ];
         user = DEFAULT_USERS.find(u => u.username.toLowerCase() === normalizedUsername);
       }
@@ -1031,7 +1055,10 @@ export async function registerRoutes(
         role: user.role,
         avatar: user.avatar,
         isAdmin: user.id === 'ADMIN',
-        mustChangePassword: user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD,
+        isApprover: user.id === 'ADMIN' || user.id === 'PROP',
+        mustChangePassword:
+          (user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD) ||
+          (user.id === 'PROP' && user.password === DEFAULT_ADMIN_PASSWORD),
       };
 
       if (req.session) {
@@ -1092,7 +1119,10 @@ export async function registerRoutes(
         role: user.role,
         avatar: user.avatar,
         isAdmin: user.id === 'ADMIN',
-        mustChangePassword: user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD,
+        isApprover: user.id === 'ADMIN' || user.id === 'PROP',
+        mustChangePassword:
+          (user.id === 'ADMIN' && user.password === DEFAULT_ADMIN_PASSWORD) ||
+          (user.id === 'PROP' && user.password === DEFAULT_ADMIN_PASSWORD),
       };
 
       return res.json(userWithoutPassword);
@@ -1122,8 +1152,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "New password must be different from current password" });
       }
 
-      // Block reusing the well-known default for the admin account
-      if (req.session.userId === 'ADMIN' && newPassword === DEFAULT_ADMIN_PASSWORD) {
+      // Block reusing the well-known default for admin / proprietor accounts
+      if ((req.session.userId === 'ADMIN' || req.session.userId === 'PROP') && newPassword === DEFAULT_ADMIN_PASSWORD) {
         return res.status(400).json({ error: "New password must be different from the default password" });
       }
 
@@ -3660,7 +3690,7 @@ showpage
         password,
         name,
         role: role || 'Verification Officer',
-        avatar: avatar || `https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80`,
+        avatar: avatar || ``,
       });
       
       console.log(`Created new associate: ${id} (${name})`);
@@ -4146,6 +4176,793 @@ showpage
     } catch (error: any) {
       console.error("Gmail import error:", error);
       return res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
+  // ────────────────────────── Office Costing (Bills / Expenses) ──────────────────────────
+  const APPROVER_IDS = new Set(['ADMIN', 'PROP']);
+  const isApproverId = (id: string | undefined | null) => !!id && APPROVER_IDS.has(id);
+  const requireAuth = (req: any, res: any): string | null => {
+    const uid = req.session?.userId;
+    if (!uid) { res.status(401).json({ error: "Not authenticated" }); return null; }
+    return uid;
+  };
+  const requireApprover = (req: any, res: any): boolean => {
+    if (!isApproverId(req.session?.userId)) {
+      res.status(403).json({ error: "Approver only" }); return false;
+    }
+    return true;
+  };
+  const parseAmount = (raw: any): number | null => {
+    const n = typeof raw === 'string' ? parseFloat(raw) : raw;
+    if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n * 100) / 100;
+  };
+  const ALLOWED_CATEGORIES = new Set<string>(EXPENSE_CATEGORIES);
+
+  // POST /api/expenses — submit a bill (associate) or own daily cost (admin)
+  app.post("/api/expenses", billUpload.single('bill'), async (req, res) => {
+    try {
+      const userId = requireAuth(req, res); if (!userId) return;
+      const { date, category, description, amount, approverId } = req.body;
+      if (!date || !category || amount === undefined) {
+        return res.status(400).json({ error: "date, category and amount are required" });
+      }
+      if (!ALLOWED_CATEGORIES.has(category)) {
+        return res.status(400).json({ error: "Invalid category" });
+      }
+      const amt = parseAmount(amount);
+      if (amt === null) return res.status(400).json({ error: "Amount must be a positive number" });
+
+      const submitterIsApprover = isApproverId(userId);
+      const finalApproverId: string = approverId || (submitterIsApprover ? userId : 'ADMIN');
+      if (!isApproverId(finalApproverId)) {
+        return res.status(400).json({ error: "Approver must be Admin or Vijay Togaru" });
+      }
+      if (userId === 'ADMIN' && finalApproverId === 'ADMIN' && (amt as number) > 200) {
+        return res.status(400).json({ error: "Admin cannot self-approve bills over ₹200. Please send to Vijay Togaru for approval." });
+      }
+
+      const billFileUrl = req.file ? `/api/expenses/file/${req.file.filename}` : null;
+      // Every bill must be supported by a soft copy. If none is attached, the
+      // submitter must explain in the description why the soft copy is missing.
+      const trimmedDescription = (description || '').trim();
+      if (!billFileUrl && !trimmedDescription) {
+        return res.status(400).json({
+          error: "A soft copy of the bill is required. If you cannot attach one, provide a description explaining why the soft copy is not available.",
+        });
+      }
+      // Approver picking themselves = auto-approve own cost.
+      // Approver picking the other approver = pending own cost (peer-approval).
+      // Associate = pending reimbursement.
+      const selfApprove = submitterIsApprover && finalApproverId === userId;
+      const status: ExpenseStatus = selfApprove ? 'approved' : 'pending';
+      const isOwnCost = submitterIsApprover;
+
+      const created = await storage.createExpense({
+        userId,
+        date,
+        category,
+        description: trimmedDescription,
+        amount: amt as any,
+        approverId: finalApproverId,
+        billFileUrl,
+        status,
+        isOwnCost,
+      });
+      return res.json(created);
+    } catch (error: any) {
+      console.error("Create expense error:", error);
+      return res.status(500).json({ error: error?.message || "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses/mine — caller's own expenses, optional ?month=YYYY-MM
+  app.get("/api/expenses/mine", async (req, res) => {
+    try {
+      const userId = requireAuth(req, res); if (!userId) return;
+      const month = (req.query.month as string) || undefined;
+      const list = await storage.getExpenses({ userId, month });
+      return res.json(list);
+    } catch (error: any) {
+      console.error("Get my expenses error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses — admin: all, filterable by status/month/user
+  app.get("/api/expenses", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const status = req.query.status as ExpenseStatus | undefined;
+      const month = req.query.month as string | undefined;
+      const userIdFilter = req.query.userId as string | undefined;
+      const list = await storage.getExpenses({ status, month, userId: userIdFilter });
+      return res.json(list);
+    } catch (error: any) {
+      console.error("List expenses error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/expenses/:id/approve  — only the designated approver may approve
+  app.patch("/api/expenses/:id/approve", async (req, res) => {
+    try {
+      const callerId = requireAuth(req, res); if (!callerId) return;
+      if (!requireApprover(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      if (exp.status !== 'pending') return res.status(400).json({ error: `Cannot approve an expense in '${exp.status}' state` });
+      if (exp.approverId !== callerId) {
+        return res.status(403).json({ error: `Only the designated approver (${exp.approverId === 'ADMIN' ? 'Admin' : 'Vijay Togaru'}) can approve this bill.` });
+      }
+      const updated = await storage.updateExpenseStatus(id, 'approved');
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Approve expense error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/expenses/:id/reject  — only the designated approver may reject (reason required)
+  app.patch("/api/expenses/:id/reject", async (req, res) => {
+    try {
+      const callerId = requireAuth(req, res); if (!callerId) return;
+      if (!requireApprover(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const { reason } = req.body || {};
+      if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({ error: "Rejection reason is required" });
+      }
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      if (exp.status === 'paid') return res.status(400).json({ error: "Cannot reject a paid expense" });
+      if (exp.approverId !== callerId) {
+        return res.status(403).json({ error: `Only the designated approver (${exp.approverId === 'ADMIN' ? 'Admin' : 'Vijay Togaru'}) can reject this bill.` });
+      }
+      const updated = await storage.updateExpenseStatus(id, 'rejected', { rejectionReason: reason.trim() });
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Reject expense error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/expenses/:id/mark-paid  — approver (only for approved associate reimbursements)
+  app.patch("/api/expenses/:id/mark-paid", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      if (exp.status !== 'approved') return res.status(400).json({ error: "Only approved expenses can be marked paid" });
+      if (exp.isOwnCost) return res.status(400).json({ error: "Own office costs are settled at approval and do not need to be marked paid" });
+      const updated = await storage.updateExpenseStatus(id, 'paid');
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Mark paid error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/expenses/:id — owner may delete pending; admin may delete anything
+  app.delete("/api/expenses/:id", async (req, res) => {
+    try {
+      const userId = requireAuth(req, res); if (!userId) return;
+      const id = parseInt(req.params.id, 10);
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      const isApprover = isApproverId(userId);
+      const isOwner = exp.userId === userId;
+      if (!isApprover && !(isOwner && exp.status === 'pending')) {
+        return res.status(403).json({ error: "Cannot delete this expense" });
+      }
+      await storage.deleteExpense(id);
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("Delete expense error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses/file/:filename — stream bill (auth required)
+  app.get("/api/expenses/file/:filename", async (req, res) => {
+    try {
+      const userId = requireAuth(req, res); if (!userId) return;
+      const filename = req.params.filename;
+      // Prevent path traversal
+      if (!/^bill-[a-z0-9-]+\.(jpg|jpeg|png|pdf)$/i.test(filename)) {
+        return res.status(400).json({ error: "Invalid filename" });
+      }
+      const path = join(BILLS_DIR, filename);
+      if (!existsSync(path)) return res.status(404).json({ error: "File not found" });
+      // Optional: enforce that user owns this expense or is admin
+      const url = `/api/expenses/file/${filename}`;
+      const all = await storage.getExpenses({});
+      const exp = all.find(e => e.billFileUrl === url);
+      const isApprover = isApproverId(userId);
+      if (!exp || (!isApprover && exp.userId !== userId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const ext = extname(filename).toLowerCase();
+      const ct = ext === '.pdf' ? 'application/pdf' : ext === '.png' ? 'image/png' : 'image/jpeg';
+      res.setHeader('Content-Type', ct);
+      createReadStream(path).pipe(res);
+    } catch (error: any) {
+      console.error("Bill file error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses/summary?months=12 — last N months stacked totals
+  app.get("/api/expenses/summary", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const monthsCount = Math.min(36, Math.max(1, parseInt((req.query.months as string) || "12", 10) || 12));
+      const now = new Date();
+      const buckets: { month: string; label: string; own: number; reimbursement: number; total: number }[] = [];
+      for (let i = monthsCount - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const label = d.toLocaleString('en-IN', { month: 'short', year: '2-digit' });
+        const list = await storage.getExpenses({ month: m });
+        let own = 0, reimb = 0;
+        for (const e of list) {
+          const amt = parseFloat(String(e.amount) || '0');
+          if (e.isOwnCost && (e.status === 'approved' || e.status === 'paid')) own += amt;
+          else if (!e.isOwnCost && e.status === 'paid') reimb += amt;
+        }
+        buckets.push({ month: m, label, own, reimbursement: reimb, total: own + reimb });
+      }
+      return res.json({ months: buckets });
+    } catch (error: any) {
+      console.error("Summary error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses/monthly?month=YYYY-MM — admin consolidated report
+  app.get("/api/expenses/monthly", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const month = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+      const list = await storage.getExpenses({ month });
+      const users = await storage.getAssociates();
+      const allUsers: any[] = [
+        ...users,
+        { id: 'ADMIN', name: 'Admin' },
+        { id: 'PROP',  name: 'Vijay Togaru' },
+      ];
+
+      const sumOf = (filter: (e: typeof list[number]) => boolean) =>
+        list.filter(filter).reduce((s, e) => s + parseFloat(String(e.amount) || '0'), 0);
+
+      // Own office costs count once approved (paid is a no-op for them).
+      // Associate reimbursements count only after they're paid out.
+      const ownTotal = sumOf(e => e.isOwnCost && (e.status === 'approved' || e.status === 'paid'));
+      const reimbPaid = sumOf(e => !e.isOwnCost && e.status === 'paid');
+      const awaitingPayment = sumOf(e => !e.isOwnCost && e.status === 'approved');
+      const pendingApproval = sumOf(e => e.status === 'pending');
+
+      const byCategory: Record<string, number> = {};
+      const byPerson: Record<string, { name: string; amount: number }> = {};
+      for (const e of list) {
+        if (e.status === 'rejected') continue;
+        const amt = parseFloat(String(e.amount) || '0');
+        byCategory[e.category] = (byCategory[e.category] || 0) + amt;
+        const u = allUsers.find((u: any) => u.id === e.userId);
+        const name = u?.name || e.userId;
+        if (!byPerson[e.userId]) byPerson[e.userId] = { name, amount: 0 };
+        byPerson[e.userId].amount += amt;
+      }
+
+      return res.json({
+        month,
+        summary: {
+          adminDailyCosts: ownTotal,
+          reimbursementsPaid: reimbPaid,
+          awaitingPayment,
+          pendingApproval,
+          monthTotal: ownTotal + reimbPaid,
+        },
+        byCategory,
+        byPerson,
+        entries: list,
+      });
+    } catch (error: any) {
+      console.error("Monthly report error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ────────────────────────── Receipts & Payments (PROP-only) ──────────────────────────
+  const STATEMENTS_DIR = join(process.cwd(), "uploads", "bank-statements");
+  if (!existsSync(STATEMENTS_DIR)) mkdirSync(STATEMENTS_DIR, { recursive: true });
+
+  const statementUpload = multer({
+    storage: multer.diskStorage({
+      destination: STATEMENTS_DIR,
+      filename: (_req, file, cb) => {
+        const ext = extname(file.originalname).toLowerCase() || '.bin';
+        const stamp = Date.now().toString(36) + '-' + randomBytes(4).toString('hex');
+        cb(null, `stmt-${stamp}${ext}`);
+      },
+    }),
+    limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+    fileFilter: (_req, file, cb) => {
+      const ext = extname(file.originalname).toLowerCase();
+      if (!['.csv', '.xls', '.xlsx'].includes(ext)) {
+        return cb(new Error('Only CSV or Excel (.csv, .xls, .xlsx) statements allowed'));
+      }
+      cb(null, true);
+    },
+  });
+
+  const requireProp = (req: any, res: any): boolean => {
+    if (req.session?.userId !== 'PROP') {
+      res.status(403).json({ error: "Proprietor only" }); return false;
+    }
+    return true;
+  };
+
+  const VALID_TXN_CATEGORIES = new Set<string>(BANK_TXN_CATEGORIES as readonly string[]);
+
+  // Parse a CSV/XLSX bank statement. Looks for header row with date/narration/debit/credit/balance.
+  function parseStatementWorkbook(filePath: string): {
+    accountNumber: string | null;
+    openingBalance: number | null;
+    closingBalance: number | null;
+    transactions: Array<{ date: string; narration: string; debit: number | null; credit: number | null; balance: number | null; rowIndex: number }>;
+  } {
+    const wb = XLSX.readFile(filePath, { raw: false, cellDates: true });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) return { accountNumber: null, openingBalance: null, closingBalance: null, transactions: [] };
+    const ws = wb.Sheets[sheetName];
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false });
+
+    // Strip parenthesised currency suffix like "(INR)" / "(Rs.)" / "(₹)" and collapse
+    // whitespace so headers like "Withdrawal Amount(INR)" normalise to "withdrawal amount".
+    const norm = (s: any) => String(s ?? '')
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const headerKeys = {
+      date: ['date', 'txn date', 'transaction date', 'value date', 'posting date'],
+      narration: ['narration', 'description', 'particulars', 'transaction remarks', 'remarks', 'details'],
+      debit: ['debit', 'debit amount', 'debit amt.', 'debit amt', 'withdrawal', 'withdrawal amt.', 'withdrawal amt', 'withdrawal amount', 'dr', 'paid out', 'amount debited'],
+      credit: ['credit', 'credit amount', 'credit amt.', 'credit amt', 'deposit', 'deposit amt.', 'deposit amt', 'deposit amount', 'cr', 'paid in', 'amount credited'],
+      balance: ['balance', 'balance amount', 'closing balance', 'running balance', 'available balance'],
+    };
+    function findHeaderRow(): { idx: number; map: Record<string, number> } | null {
+      for (let i = 0; i < Math.min(rows.length, 30); i++) {
+        const row = rows[i].map(norm);
+        const map: Record<string, number> = {};
+        for (const [key, aliases] of Object.entries(headerKeys)) {
+          const colIdx = row.findIndex(cell => aliases.includes(cell));
+          if (colIdx !== -1) map[key] = colIdx;
+        }
+        // need at least date + (debit or credit) + narration
+        if (map.date != null && map.narration != null && (map.debit != null || map.credit != null)) {
+          return { idx: i, map };
+        }
+      }
+      return null;
+    }
+    const found = findHeaderRow();
+    if (!found) return { accountNumber: null, openingBalance: null, closingBalance: null, transactions: [] };
+
+    // Try to find an "Account Number" / "A/c No." cell in the header block above the table,
+    // then take the first non-empty cell to its right as the value. Strip currency/holder name
+    // qualifiers — keep only the digit run (ICICI: "007801520178 ( INR )  - VIJAY KUMAR T").
+    function findAccountNumber(headerIdx: number): string | null {
+      const label = /^\s*(account\s*(no\.?|number|num)|a\/c\s*(no\.?|number))\s*[:.]?\s*$/i;
+      for (let i = 0; i < headerIdx; i++) {
+        const cells = (rows[i] || []).map(c => String(c ?? '').trim());
+        for (let c = 0; c < cells.length; c++) {
+          if (!label.test(cells[c])) continue;
+          for (let cc = c + 1; cc < cells.length; cc++) {
+            const v = cells[cc];
+            if (!v) continue;
+            const m = v.match(/\d{6,}/);
+            return m ? m[0] : v;
+          }
+        }
+      }
+      return null;
+    }
+    const accountNumber = findAccountNumber(found.idx);
+
+    const parseNum = (v: any): number | null => {
+      if (v == null || v === '') return null;
+      const cleaned = String(v).replace(/[,\s₹]/g, '');
+      const n = parseFloat(cleaned);
+      return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+    };
+    const parseDate = (v: any): string | null => {
+      if (v == null || v === '') return null;
+      if (v instanceof Date && !isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+      const s = String(v).trim();
+      // try DD/MM/YYYY or DD-MM-YYYY (yy or yyyy)
+      const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if (m) {
+        const [_, d, mo, y] = m;
+        const yyyy = y.length === 2 ? '20' + y : y;
+        return `${yyyy}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+      }
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      return null;
+    };
+
+    // Find a row whose own cell is a label like "Opening Balance" (whole-cell match — must
+    // not be embedded in narration). Then take the value from a later column on the same row,
+    // or from the same column on the next row (HDFC summary block uses this layout).
+    function findExplicitOpening(headerIdx: number, lastTxnIdx: number): number | null {
+      const open = /^\s*(opening\s*balance|balance\s*b\/?f|brought\s*forward|balance\s*c\/?f.*prev)\s*[:.]?\s*$/i;
+      const scan = (start: number, end: number): number | null => {
+        for (let i = start; i < end; i++) {
+          const cells = (rows[i] || []).map(c => String(c ?? '').trim());
+          for (let c = 0; c < cells.length; c++) {
+            if (!open.test(cells[c])) continue;
+            for (let cc = c + 1; cc < cells.length; cc++) {
+              const n = parseNum(cells[cc]);
+              if (n != null) return n;
+            }
+            const nextRow = rows[i + 1];
+            if (nextRow) {
+              const n = parseNum(nextRow[c]);
+              if (n != null) return n;
+            }
+          }
+        }
+        return null;
+      };
+      return scan(0, headerIdx) ?? scan(lastTxnIdx + 1, rows.length);
+    }
+
+    const transactions: Array<{ date: string; narration: string; debit: number | null; credit: number | null; balance: number | null; rowIndex: number }> = [];
+    let lastTxnRowIdx = found.idx;
+    for (let i = found.idx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every(c => c == null || c === '')) continue;
+      const date = parseDate(row[found.map.date]);
+      if (!date) continue; // skip separator rows (e.g., HDFC's "********") and footers
+      const narration = String(row[found.map.narration] ?? '').trim();
+      const debit = found.map.debit != null ? parseNum(row[found.map.debit]) : null;
+      const credit = found.map.credit != null ? parseNum(row[found.map.credit]) : null;
+      const balance = found.map.balance != null ? parseNum(row[found.map.balance]) : null;
+      if (debit == null && credit == null && balance == null && !narration) continue;
+      transactions.push({ date, narration, debit, credit, balance, rowIndex: i });
+      lastTxnRowIdx = i;
+    }
+
+    const explicitOpening = findExplicitOpening(found.idx, lastTxnRowIdx);
+
+    // Opening: prefer an explicit "Opening Balance" / "B/F" row; otherwise back-compute
+    // from the first transaction's running balance: opening = balance - (credit - debit).
+    // Closing = balance of the last transaction.
+    let openingBalance: number | null = explicitOpening;
+    let closingBalance: number | null = null;
+    if (transactions.length > 0) {
+      if (openingBalance == null) {
+        const first = transactions[0];
+        if (first.balance != null) {
+          const net = (first.credit ?? 0) - (first.debit ?? 0);
+          openingBalance = Math.round((first.balance - net) * 100) / 100;
+        }
+      }
+      const last = transactions[transactions.length - 1];
+      if (last.balance != null) closingBalance = last.balance;
+    }
+    return { accountNumber, openingBalance, closingBalance, transactions };
+  }
+
+  // POST /api/bank-statements — upload + parse a bank statement
+  app.post("/api/bank-statements", statementUpload.single('statement'), async (req, res) => {
+    try {
+      const userId = requireAuth(req, res); if (!userId) return;
+      if (!requireProp(req, res)) return;
+      const {
+        bankName,
+        accountNumber: accountNumberOverride,
+        month,
+        openingBalance: openingBalanceOverride,
+        closingBalance: closingBalanceOverride,
+      } = req.body;
+      if (!bankName || typeof bankName !== 'string') return res.status(400).json({ error: "bankName is required" });
+      if (!/^\d{4}-\d{2}$/.test(String(month || ''))) return res.status(400).json({ error: "month must be YYYY-MM" });
+      if (!req.file) return res.status(400).json({ error: "statement file required" });
+
+      const parsed = parseStatementWorkbook(req.file.path);
+      if (parsed.transactions.length === 0) {
+        return res.status(400).json({ error: "Could not find any transactions in this file. Make sure the sheet has columns like Date, Narration/Description, Debit/Withdrawal, Credit/Deposit, Balance." });
+      }
+      // Pin opening/closing to the selected month: when the file's transactions
+      // span months (e.g., an Apr+May file uploaded as May), the parser's
+      // file-wide back-compute would yield the balance before the file's first
+      // txn — which is April's opening, not May's. Filter to in-month txns and
+      // derive from those.
+      const monthPrefix = `${month}-`;
+      const monthTxns = parsed.transactions
+        .filter(t => t.date.startsWith(monthPrefix))
+        .sort((a, b) => a.date.localeCompare(b.date) || a.rowIndex - b.rowIndex);
+
+      let openingBalance: number;
+      if (openingBalanceOverride != null && openingBalanceOverride !== '') {
+        openingBalance = parseFloat(String(openingBalanceOverride));
+      } else if (monthTxns.length > 0 && monthTxns[0].balance != null) {
+        const f = monthTxns[0];
+        const net = (f.credit ?? 0) - (f.debit ?? 0);
+        openingBalance = Math.round((f.balance! - net) * 100) / 100;
+      } else if (parsed.openingBalance != null && Number.isFinite(parsed.openingBalance)) {
+        openingBalance = parsed.openingBalance;
+      } else {
+        const prev = await storage.getLatestClosingBalanceBefore(bankName.trim(), month);
+        openingBalance = prev ? parseFloat(prev.closingBalance) : 0;
+      }
+      if (!Number.isFinite(openingBalance)) openingBalance = 0;
+
+      let closingBalance: number;
+      if (closingBalanceOverride != null && closingBalanceOverride !== '') {
+        closingBalance = parseFloat(String(closingBalanceOverride));
+      } else if (monthTxns.length > 0 && monthTxns[monthTxns.length - 1].balance != null) {
+        closingBalance = monthTxns[monthTxns.length - 1].balance!;
+      } else if (parsed.closingBalance != null) {
+        closingBalance = parsed.closingBalance;
+      } else {
+        closingBalance = openingBalance + parsed.transactions.reduce((s, t) => s + (t.credit ?? 0) - (t.debit ?? 0), 0);
+      }
+      if (!Number.isFinite(closingBalance)) closingBalance = 0;
+
+      const rawAccount = typeof accountNumberOverride === 'string' && accountNumberOverride.trim()
+        ? accountNumberOverride.trim()
+        : (parsed.accountNumber ?? null);
+
+      const { classifyByRules } = await import("./bank-txn-rules");
+      const ctx = { bankName: bankName.trim(), accountNumber: rawAccount };
+      const classified = parsed.transactions.map(t => {
+        const cat = classifyByRules(t.narration, t.debit, t.credit, ctx);
+        return cat ? { ...t, category: cat } : t;
+      });
+
+      // Try to merge into an existing statement for the same bank + account + month.
+      // Matching: same month + same bankName (case-insensitive) + account number
+      // either exact-match or backfill-into-blank when the new upload has one.
+      const existing = await storage.findBankStatementForMerge(month, bankName.trim(), rawAccount);
+      if (existing) {
+        const existingTxns = await storage.listBankTransactions(existing.id);
+        const toKey = (t: { date: string; narration: string; debit: any; credit: any }) => {
+          const n = (x: any) => x == null || x === '' ? '' : String(Math.round(parseFloat(String(x)) * 100));
+          return `${t.date}|${(t.narration || '').trim().toLowerCase()}|${n(t.debit)}|${n(t.credit)}`;
+        };
+        const seen = new Set(existingTxns.map(toKey));
+        const baseRowIdx = existingTxns.reduce((m, t) => Math.max(m, t.rowIndex), 0);
+        const newTxns = classified
+          .filter(t => !seen.has(toKey(t)))
+          .map((t, i) => ({ ...t, rowIndex: baseRowIdx + 1 + i }));
+
+        // Recompute opening/closing from the merged set, sorted by date then row.
+        type Merged = { date: string; rowIndex: number; debit: number | null; credit: number | null; balance: number | null };
+        const toNum = (v: any): number | null => v == null || v === '' ? null : (Number.isFinite(parseFloat(String(v))) ? parseFloat(String(v)) : null);
+        const merged: Merged[] = [
+          ...existingTxns.map(t => ({ date: t.date, rowIndex: t.rowIndex, debit: toNum(t.debit), credit: toNum(t.credit), balance: toNum(t.balance) })),
+          ...newTxns.map(t => ({ date: t.date, rowIndex: t.rowIndex, debit: t.debit ?? null, credit: t.credit ?? null, balance: t.balance ?? null })),
+        ].sort((a, b) => a.date.localeCompare(b.date) || a.rowIndex - b.rowIndex);
+
+        let mergedOpening = parseFloat(existing.openingBalance);
+        if (merged.length > 0 && merged[0].balance != null) {
+          const f = merged[0];
+          const net = (f.credit ?? 0) - (f.debit ?? 0);
+          mergedOpening = Math.round((f.balance! - net) * 100) / 100;
+        }
+        let mergedClosing = parseFloat(existing.closingBalance);
+        for (let i = merged.length - 1; i >= 0; i--) {
+          if (merged[i].balance != null) { mergedClosing = merged[i].balance!; break; }
+        }
+        if (!Number.isFinite(mergedOpening)) mergedOpening = 0;
+        if (!Number.isFinite(mergedClosing)) mergedClosing = 0;
+
+        const patch: { accountNumber?: string | null; openingBalance?: number; closingBalance?: number; sourceFileUrl?: string | null } = {
+          openingBalance: Math.round(mergedOpening * 100) / 100,
+          closingBalance: Math.round(mergedClosing * 100) / 100,
+          sourceFileUrl: `/api/bank-statements/file/${req.file.filename}`,
+        };
+        if (!(existing.accountNumber ?? '').trim() && rawAccount) {
+          patch.accountNumber = rawAccount;
+        }
+
+        const result = await storage.appendBankTransactions(existing.id, newTxns, patch);
+        return res.json({
+          statement: result.statement,
+          transactions: result.appended,
+          merged: true,
+          appended: newTxns.length,
+          skippedDuplicates: classified.length - newTxns.length,
+        });
+      }
+
+      const created = await storage.createBankStatement({
+        bankName: bankName.trim(),
+        accountNumber: rawAccount,
+        month,
+        openingBalance: Math.round(openingBalance * 100) / 100,
+        closingBalance: Math.round(closingBalance * 100) / 100,
+        sourceFileUrl: `/api/bank-statements/file/${req.file.filename}`,
+        uploadedBy: userId,
+        transactions: classified,
+      });
+      return res.json(created);
+    } catch (error: any) {
+      console.error("Upload bank statement error:", error);
+      return res.status(500).json({ error: error?.message || "Internal server error" });
+    }
+  });
+
+  // GET /api/bank-statements?month=YYYY-MM
+  app.get("/api/bank-statements", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const month = (req.query.month as string) || undefined;
+      const list = await storage.listBankStatements({ month });
+      return res.json(list);
+    } catch (error: any) {
+      console.error("List bank statements error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/bank-statements/prev-closing?bank=...&month=YYYY-MM
+  app.get("/api/bank-statements/prev-closing", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const bank = (req.query.bank as string || '').trim();
+      const month = req.query.month as string;
+      if (!bank || !/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ error: "bank and month required" });
+      const prev = await storage.getLatestClosingBalanceBefore(bank, month);
+      return res.json(prev ?? null);
+    } catch (error: any) {
+      console.error("prev-closing error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/bank-statements/:id/transactions
+  app.get("/api/bank-statements/:id/transactions", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const stmt = await storage.getBankStatementById(id);
+      if (!stmt) return res.status(404).json({ error: "Statement not found" });
+      const txns = await storage.listBankTransactions(id);
+      return res.json({ statement: stmt, transactions: txns });
+    } catch (error: any) {
+      console.error("List transactions error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/bank-transactions/:id  — set category and/or comment
+  app.patch("/api/bank-transactions/:id", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const { category, comment } = req.body || {};
+      const patch: { category?: string; comment?: string } = {};
+      if (category !== undefined) {
+        if (typeof category !== 'string' || !VALID_TXN_CATEGORIES.has(category)) {
+          return res.status(400).json({ error: "Invalid category" });
+        }
+        patch.category = category;
+      }
+      if (comment !== undefined) {
+        if (typeof comment !== 'string') return res.status(400).json({ error: "Invalid comment" });
+        patch.comment = comment.slice(0, 500);
+      }
+      const updated = await storage.updateBankTransactionClassification(id, patch);
+      if (!updated) return res.status(404).json({ error: "Transaction not found" });
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Update transaction error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /api/bank-statements/:id/reclassify — re-apply classification rules to Unclassified txns
+  app.post("/api/bank-statements/:id/reclassify", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const stmt = await storage.getBankStatementById(id);
+      if (!stmt) return res.status(404).json({ error: "Not found" });
+      const txns = await storage.listBankTransactions(id);
+      const { classifyByRules } = await import("./bank-txn-rules");
+      const ctx = { bankName: stmt.bankName, accountNumber: stmt.accountNumber };
+      let updatedCount = 0;
+      for (const t of txns) {
+        if (t.category !== 'Unclassified') continue;
+        const debit = t.debit != null ? parseFloat(String(t.debit)) : null;
+        const credit = t.credit != null ? parseFloat(String(t.credit)) : null;
+        const cat = classifyByRules(t.narration, debit, credit, ctx);
+        if (cat) {
+          await storage.updateBankTransactionClassification(t.id, { category: cat });
+          updatedCount++;
+        }
+      }
+      return res.json({ statementId: id, updated: updatedCount, total: txns.length });
+    } catch (error: any) {
+      console.error("Reclassify error:", error);
+      return res.status(500).json({ error: error?.message || "Internal server error" });
+    }
+  });
+
+  // PATCH /api/bank-statements/:id — update bank name / account / balances
+  app.patch("/api/bank-statements/:id", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const patch: { bankName?: string; accountNumber?: string | null; openingBalance?: number; closingBalance?: number } = {};
+      if (typeof req.body.bankName === 'string') {
+        const v = req.body.bankName.trim();
+        if (!v) return res.status(400).json({ error: "bankName cannot be empty" });
+        patch.bankName = v;
+      }
+      if (req.body.accountNumber !== undefined) {
+        const v = req.body.accountNumber == null ? null : String(req.body.accountNumber).trim();
+        patch.accountNumber = v ? v : null;
+      }
+      for (const key of ['openingBalance', 'closingBalance'] as const) {
+        if (req.body[key] !== undefined && req.body[key] !== '') {
+          const n = parseFloat(String(req.body[key]));
+          if (!Number.isFinite(n)) return res.status(400).json({ error: `${key} must be a number` });
+          patch[key] = Math.round(n * 100) / 100;
+        }
+      }
+      const updated = await storage.updateBankStatement(id, patch);
+      if (!updated) return res.status(404).json({ error: "Not found" });
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Patch bank statement error:", error);
+      return res.status(500).json({ error: error?.message || "Internal server error" });
+    }
+  });
+
+  // DELETE /api/bank-statements/:id
+  app.delete("/api/bank-statements/:id", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const ok = await storage.deleteBankStatement(id);
+      if (!ok) return res.status(404).json({ error: "Statement not found" });
+      return res.json({ deleted: true });
+    } catch (error: any) {
+      console.error("Delete statement error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/bank-statements/file/:filename — stream the original file
+  app.get("/api/bank-statements/file/:filename", async (req, res) => {
+    try {
+      if (!requireAuth(req, res)) return;
+      if (!requireProp(req, res)) return;
+      const filename = req.params.filename;
+      if (!/^stmt-[a-z0-9-]+\.(csv|xls|xlsx)$/i.test(filename)) return res.status(400).json({ error: "Bad filename" });
+      const filePath = join(STATEMENTS_DIR, filename);
+      if (!existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+      return createReadStream(filePath).pipe(res);
+    } catch (error: any) {
+      console.error("Stream statement error:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, numeric, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -310,3 +310,111 @@ export const insertArchiveStatsSchema = createInsertSchema(archiveStats).omit({
 
 export type InsertArchiveStats = z.infer<typeof insertArchiveStatsSchema>;
 export type ArchiveStats = typeof archiveStats.$inferSelect;
+
+// Office Costing — expense bills submitted by associates + admin's own daily costs
+export type ExpenseStatus = 'pending' | 'approved' | 'paid' | 'rejected';
+export type ExpenseCategory =
+  | 'Petrol bill' | 'Car Parking' | 'Food' | 'Stationery' | 'Printing' | 'Courier'
+  | 'Internet' | 'Office Rent' | 'Utilities' | 'Misc';
+
+export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  'Petrol bill', 'Car Parking', 'Food', 'Stationery', 'Printing', 'Courier',
+  'Internet', 'Office Rent', 'Utilities', 'Misc',
+];
+
+export const EXPENSE_STATUSES: ExpenseStatus[] = ['pending', 'approved', 'paid', 'rejected'];
+
+export const expenses = pgTable("expenses", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id", { length: 10 }).notNull().references(() => users.id),
+  date: text("date").notNull(),
+  category: text("category").notNull(),
+  description: text("description").default('').notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  approverId: varchar("approver_id", { length: 10 }).notNull().references(() => users.id),
+  billFileUrl: text("bill_file_url"),
+  status: text("status").notNull().default('pending'),
+  approvedAt: timestamp("approved_at"),
+  paidAt: timestamp("paid_at"),
+  rejectionReason: text("rejection_reason"),
+  isOwnCost: boolean("is_own_cost").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertExpenseSchema = createInsertSchema(expenses).omit({
+  id: true,
+  createdAt: true,
+  approvedAt: true,
+  paidAt: true,
+});
+
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+export type Expense = typeof expenses.$inferSelect;
+
+// Bank statements (Receipts & Payments) — PROP-only
+// Ordered by expected selection frequency — Unclassified first as default,
+// then the categories the user picks most often. Less common items follow.
+// Reorder when the workflow changes.
+export const BANK_TXN_CATEGORIES = [
+  'Unclassified',
+  'Internal Transfer',
+  'Misc',
+  'Salary',
+  'Personal expense',
+  'Office expense',
+  'Entertainment Expense',
+  'Credit Card Pmt',
+  'Wife AC',
+  'Office rent',
+  'Commission paid',
+  'Hand Loan - Family',
+  'Revenue - Andro',
+  'Revenue - Mucare',
+  'Revenue - Piramal',
+  'Revenue - Others',
+  'Dividend Revenue',
+  'Investment withdrawal',
+  'Investment addition',
+  'Loan disbursement',
+  'Client payment',
+  'Refund',
+  'Chit payment',
+  'Statutory (TDS/GST)',
+  'Bank charges',
+  'Daughter Function expense',
+  'Transfer',
+  'Other',
+] as const;
+export type BankTxnCategory = typeof BANK_TXN_CATEGORIES[number];
+
+export const bankStatements = pgTable("bank_statements", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  bankName: text("bank_name").notNull(),
+  accountNumber: text("account_number"),
+  month: text("month").notNull(), // 'YYYY-MM'
+  openingBalance: numeric("opening_balance", { precision: 14, scale: 2 }).notNull(),
+  closingBalance: numeric("closing_balance", { precision: 14, scale: 2 }).notNull(),
+  sourceFileUrl: text("source_file_url"),
+  uploadedBy: varchar("uploaded_by", { length: 10 }).notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const bankTransactions = pgTable("bank_transactions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  statementId: integer("statement_id").notNull().references(() => bankStatements.id, { onDelete: 'cascade' }),
+  date: text("date").notNull(), // YYYY-MM-DD
+  narration: text("narration").notNull().default(''),
+  debit: numeric("debit", { precision: 14, scale: 2 }),
+  credit: numeric("credit", { precision: 14, scale: 2 }),
+  balance: numeric("balance", { precision: 14, scale: 2 }),
+  category: text("category").notNull().default('Unclassified'),
+  comment: text("comment").notNull().default(''),
+  rowIndex: integer("row_index").notNull().default(0),
+});
+
+export const insertBankStatementSchema = createInsertSchema(bankStatements).omit({ id: true, createdAt: true });
+export const insertBankTransactionSchema = createInsertSchema(bankTransactions).omit({ id: true });
+export type InsertBankStatement = z.infer<typeof insertBankStatementSchema>;
+export type BankStatement = typeof bankStatements.$inferSelect;
+export type InsertBankTransaction = z.infer<typeof insertBankTransactionSchema>;
+export type BankTransaction = typeof bankTransactions.$inferSelect;

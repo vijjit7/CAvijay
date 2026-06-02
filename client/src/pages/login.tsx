@@ -16,16 +16,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const ADMIN_USERNAME = "admin";
+const PRIVILEGED_USERNAMES = new Set(["admin", "vijay"]);
 
 const quickLoginUsers = [
-  { username: "admin", name: "Admin", avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80" },
-  { username: "bharat", name: "Bharat", avatar: "https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80" },
-  { username: "narender", name: "Narender", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80" },
-  { username: "upender", name: "Upender", avatar: "https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80" },
-  { username: "avinash", name: "Avinash", avatar: "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80" },
-  { username: "prashanth", name: "Prashanth", avatar: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80" },
-  { username: "anosh", name: "Anosh", avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80" },
+  { username: "admin", name: "Admin", avatar: "" },
+  { username: "vijay", name: "Vijay Togaru", avatar: "" },
+  { username: "bharat", name: "Bharat", avatar: "" },
+  { username: "narender", name: "Narender", avatar: "" },
+  { username: "upender", name: "Upender", avatar: "" },
+  { username: "avinash", name: "Avinash", avatar: "" },
+  { username: "prashanth", name: "Prashanth", avatar: "" },
+  { username: "anosh", name: "Anosh", avatar: "" },
 ];
 
 export default function LoginPage() {
@@ -35,10 +36,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
 
-  const [adminDialogOpen, setAdminDialogOpen] = useState(false);
+  const [privUsername, setPrivUsername] = useState<string | null>(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminError, setAdminError] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
+  const privUser = privUsername ? quickLoginUsers.find(u => u.username === privUsername) : null;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,10 +66,10 @@ export default function LoginPage() {
   };
 
   const handleQuickLogin = async (selectedUsername: string) => {
-    if (selectedUsername === ADMIN_USERNAME) {
+    if (PRIVILEGED_USERNAMES.has(selectedUsername)) {
       setAdminError("");
       setAdminPassword("");
-      setAdminDialogOpen(true);
+      setPrivUsername(selectedUsername);
       return;
     }
 
@@ -89,19 +91,20 @@ export default function LoginPage() {
     e.preventDefault();
     setAdminError("");
 
+    if (!privUsername) return;
     if (!adminPassword) {
-      setAdminError("Please enter the admin password.");
+      setAdminError("Please enter the password.");
       return;
     }
 
     setAdminLoading(true);
     try {
-      const success = await login(ADMIN_USERNAME, adminPassword);
+      const success = await login(privUsername, adminPassword);
       if (success) {
-        setAdminDialogOpen(false);
+        setPrivUsername(null);
         setAdminPassword("");
       } else {
-        setAdminError("Invalid admin password.");
+        setAdminError("Invalid password.");
       }
     } catch (err) {
       setAdminError("Login failed. Please try again.");
@@ -128,12 +131,12 @@ export default function LoginPage() {
               <Users className="h-5 w-5" />
               Quick Login
             </CardTitle>
-            <CardDescription>Click on a user to sign in instantly. Admin requires a password.</CardDescription>
+            <CardDescription>Click on a user to sign in instantly. Admin and Vijay Togaru require a password.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3">
               {quickLoginUsers.map((user) => {
-                const isAdmin = user.username === ADMIN_USERNAME;
+                const isPrivileged = PRIVILEGED_USERNAMES.has(user.username);
                 return (
                   <Button
                     key={user.username}
@@ -148,7 +151,7 @@ export default function LoginPage() {
                       <AvatarFallback>{user.name[0]}</AvatarFallback>
                     </Avatar>
                     <span className="text-sm font-medium">{user.name}</span>
-                    {isAdmin && (
+                    {isPrivileged && (
                       <span className="absolute top-1.5 right-1.5 text-blue-600">
                         <ShieldCheck className="h-4 w-4" />
                       </span>
@@ -213,9 +216,9 @@ export default function LoginPage() {
         </Card>
       </div>
 
-      <Dialog open={adminDialogOpen} onOpenChange={(open) => {
-        setAdminDialogOpen(open);
+      <Dialog open={!!privUsername} onOpenChange={(open) => {
         if (!open) {
+          setPrivUsername(null);
           setAdminPassword("");
           setAdminError("");
         }
@@ -225,9 +228,9 @@ export default function LoginPage() {
             <div className="mx-auto h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center mb-2">
               <ShieldCheck className="h-5 w-5 text-white" />
             </div>
-            <DialogTitle className="text-center">Admin password required</DialogTitle>
+            <DialogTitle className="text-center">{privUser?.name ?? "Privileged"} password required</DialogTitle>
             <DialogDescription className="text-center">
-              Enter the admin password to continue. Default is <code className="font-mono">password@123</code> on first login.
+              Enter the password for <strong>{privUser?.name ?? privUsername}</strong> to continue. Default is <code className="font-mono">password@123</code> on first login.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAdminSubmit} className="space-y-4">
@@ -251,7 +254,7 @@ export default function LoginPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setAdminDialogOpen(false)}
+                onClick={() => setPrivUsername(null)}
                 disabled={adminLoading}
               >
                 Cancel

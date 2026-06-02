@@ -1,18 +1,21 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Users, 
-  BarChart3, 
-  Settings, 
+import {
+  LayoutDashboard,
+  FileText,
+  Users,
+  BarChart3,
+  Settings,
   Search,
   Bell,
   LogOut,
   Menu,
   Upload,
   ClipboardList,
-  FilePlus
+  FilePlus,
+  Receipt,
+  Wallet,
+  Landmark
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +56,7 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
     { icon: Users, label: "Associates", path: "/associates" },
     { icon: ClipboardList, label: "MIS", path: "/mis" },
     { icon: BarChart3, label: "MIS Dashboard", path: "/mis-dashboard" },
+    { icon: Wallet, label: "Office Costing", path: "/office-costing" },
   ];
 
   const associateNavItems = [
@@ -60,9 +64,18 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
     { icon: FilePlus, label: "Create Report", path: "/create-report" },
     { icon: Upload, label: "Upload Reports", path: "/upload" },
     { icon: FileText, label: "My Reports", path: "/reports" },
+    { icon: Receipt, label: "Bill", path: "/bill" },
   ];
 
-  const navItems = user.isAdmin ? adminNavItems : associateNavItems;
+  const proprietorNavItems = [
+    { icon: Wallet, label: "Office Costing", path: "/office-costing" },
+    { icon: Landmark, label: "Receipts & Payments", path: "/receipts-and-payments" },
+  ];
+
+  const navItems =
+    user.id === 'PROP' ? proprietorNavItems :
+    user.isAdmin ? adminNavItems :
+    associateNavItems;
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-slate-900 text-slate-300">

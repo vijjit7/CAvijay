@@ -235,6 +235,61 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
   const [exportToDate, setExportToDate] = useState("");
   const [purging, setPurging] = useState(false);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+  const [downloadingMis, setDownloadingMis] = useState(false);
+
+  const handleDownloadMis = async () => {
+    setDownloadingMis(true);
+    try {
+      const response = await fetch('/api/mis', { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch MIS entries');
+      const entries: any[] = await response.json();
+
+      if (!entries.length) {
+        toast({ title: "No Data", description: "There are no MIS entries to download.", variant: "destructive" });
+        return;
+      }
+
+      const associateName = (id: string | null) =>
+        associates.find((a: any) => a.id === id)?.name || '';
+
+      const headers = ["SNO", "Lead ID", "Applicant", "Business", "Phone", "Address", "Branch", "In Date", "Out Date", "Initiated By", "PD Person", "Status"];
+      const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+      const csvRows = [headers.join(",")];
+      entries.forEach((entry, index) => {
+        csvRows.push([
+          index + 1,
+          esc(entry.leadId),
+          esc(entry.customerName),
+          esc(entry.businessName),
+          esc(entry.contactDetails),
+          esc(entry.customerAddress),
+          esc(entry.location),
+          esc(entry.inDate),
+          esc(entry.outDate),
+          esc(entry.initiatedPerson),
+          esc(associateName(entry.pdPersonId) || entry.pdPerson),
+          esc(entry.status),
+        ].join(","));
+      });
+
+      const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `auditguard-mis-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(a);
+
+      toast({ title: "MIS Downloaded", description: `${entries.length} MIS entries exported as CSV.` });
+    } catch (error: any) {
+      toast({ title: "Download Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setDownloadingMis(false);
+    }
+  };
 
   const handleExportReports = async () => {
     setExporting(true);
@@ -485,6 +540,15 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
              >
                <Download className="h-4 w-4 mr-2" />
                {exporting ? 'Exporting...' : (exportFromDate || exportToDate ? 'Export Range' : 'Export All')}
+             </Button>
+             <Button
+               variant="outline"
+               onClick={handleDownloadMis}
+               disabled={downloadingMis}
+               data-testid="button-download-mis"
+             >
+               <Download className="h-4 w-4 mr-2" />
+               {downloadingMis ? 'Downloading...' : 'Download MIS'}
              </Button>
              <Button
                variant="outline"

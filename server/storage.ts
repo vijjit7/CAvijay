@@ -1,18 +1,140 @@
-import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, users, reports, misEntries, archiveStats } from "@shared/schema";
+import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bankStatements, bankTransactions } from "@shared/schema";
+import * as fs from "fs";
+import * as path from "path";
+
+export type NewExpense = {
+  userId: string;
+  date: string;
+  category: string;
+  description?: string;
+  amount: number | string;
+  approverId: string;
+  billFileUrl?: string | null;
+  status?: ExpenseStatus;
+  isOwnCost?: boolean;
+};
 import { requireDb, db } from "./db";
 import { eq, and, sql, desc } from "drizzle-orm";
 
 // Fallback users for local development when database is not available
 const DEFAULT_USERS: User[] = [
-  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80' },
-  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80' },
-  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80' },
-  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80' },
-  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80' },
-  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80' },
-  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80' },
-  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&q=80' }
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '' },
+  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '' },
+  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '' },
+  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '' },
+  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '' },
+  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '' },
+  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '' },
+  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '' },
+  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '' }
 ];
+
+// Persist in-memory user changes (e.g. password updates) to disk so they
+// survive dev-server restarts when DATABASE_URL is not configured.
+const DEV_USERS_FILE = path.resolve(process.cwd(), 'tmp', 'dev-users.json');
+
+function loadDevUserOverrides() {
+  try {
+    if (!fs.existsSync(DEV_USERS_FILE)) return;
+    const raw = fs.readFileSync(DEV_USERS_FILE, 'utf8');
+    const overrides = JSON.parse(raw) as Array<Partial<User> & { id: string }>;
+    for (const o of overrides) {
+      const target = DEFAULT_USERS.find(u => u.id === o.id);
+      if (target && typeof o.password === 'string') {
+        target.password = o.password;
+      }
+    }
+    console.log(`[Storage] Loaded ${overrides.length} dev-user overrides from ${DEV_USERS_FILE}`);
+  } catch (err) {
+    console.error('[Storage] Failed to load dev-user overrides:', err);
+  }
+}
+
+function saveDevUserOverrides() {
+  try {
+    fs.mkdirSync(path.dirname(DEV_USERS_FILE), { recursive: true });
+    const tmp = DEV_USERS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_USERS, null, 2), 'utf8');
+    fs.renameSync(tmp, DEV_USERS_FILE);
+  } catch (err) {
+    console.error('[Storage] Failed to save dev-user overrides:', err);
+  }
+}
+
+loadDevUserOverrides();
+
+// ── In-memory store persistence (dev only, no DATABASE_URL) ───────────────────
+// Mirror reports/MIS/expenses/bank statements/transactions + sequence counters
+// to a JSON file so they survive restarts. Without this, every code change that
+// restarts the server wipes everything you uploaded.
+const DEV_STATE_FILE = path.resolve(process.cwd(), 'tmp', 'dev-state.json');
+let suspendPersist = false;
+let persistTimer: NodeJS.Timeout | null = null;
+
+function reviveCreatedAt<T extends { createdAt?: any }>(items: any[]): T[] {
+  for (const it of items) {
+    if (it && typeof it.createdAt === 'string') {
+      const d = new Date(it.createdAt);
+      if (!isNaN(d.getTime())) it.createdAt = d;
+    }
+  }
+  return items as T[];
+}
+
+function loadDevState() {
+  try {
+    if (!fs.existsSync(DEV_STATE_FILE)) return;
+    suspendPersist = true;
+    const raw = fs.readFileSync(DEV_STATE_FILE, 'utf8');
+    const s = JSON.parse(raw) as any;
+    if (Array.isArray(s.reports)) { inMemoryReports.length = 0; inMemoryReports.push(...reviveCreatedAt<Report>(s.reports)); }
+    if (Array.isArray(s.misEntries)) { inMemoryMisEntries.length = 0; inMemoryMisEntries.push(...reviveCreatedAt<MisEntry>(s.misEntries)); }
+    if (Array.isArray(s.expenses)) { inMemoryExpenses.length = 0; inMemoryExpenses.push(...reviveCreatedAt<Expense>(s.expenses)); }
+    if (Array.isArray(s.bankStatements)) { inMemoryBankStatements.length = 0; inMemoryBankStatements.push(...reviveCreatedAt<BankStatement>(s.bankStatements)); }
+    if (Array.isArray(s.bankTransactions)) { inMemoryBankTransactions.length = 0; inMemoryBankTransactions.push(...s.bankTransactions); }
+    if (typeof s.expenseSeq === 'number') memSeq.expense = s.expenseSeq;
+    if (typeof s.bankStmtSeq === 'number') memSeq.bankStmt = s.bankStmtSeq;
+    if (typeof s.bankTxnSeq === 'number') memSeq.bankTxn = s.bankTxnSeq;
+    console.log(`[Storage] Loaded dev state from ${DEV_STATE_FILE}: ${inMemoryReports.length} reports, ${inMemoryMisEntries.length} MIS, ${inMemoryExpenses.length} expenses, ${inMemoryBankStatements.length} statements, ${inMemoryBankTransactions.length} txns`);
+  } catch (err) {
+    console.error('[Storage] Failed to load dev state:', err);
+  } finally {
+    suspendPersist = false;
+  }
+}
+
+function saveDevStateNow() {
+  try {
+    fs.mkdirSync(path.dirname(DEV_STATE_FILE), { recursive: true });
+    const state = {
+      reports: inMemoryReports,
+      misEntries: inMemoryMisEntries,
+      expenses: inMemoryExpenses,
+      bankStatements: inMemoryBankStatements,
+      bankTransactions: inMemoryBankTransactions,
+      expenseSeq: memSeq.expense,
+      bankStmtSeq: memSeq.bankStmt,
+      bankTxnSeq: memSeq.bankTxn,
+    };
+    const tmp = DEV_STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
+    fs.renameSync(tmp, DEV_STATE_FILE);
+  } catch (err) {
+    console.error('[Storage] Failed to save dev state:', err);
+  }
+}
+
+// Debounced — many mutations during a single operation (e.g. bulk insert of 86
+// txns) collapse to one write.
+function persist() {
+  if (suspendPersist) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(saveDevStateNow, 150);
+}
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => { if (persistTimer) { clearTimeout(persistTimer); saveDevStateNow(); } process.exit(0); });
+}
 
 export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -65,11 +187,66 @@ export interface IStorage {
   getTotalReportsCount(): Promise<number>;
   getTotalMisEntriesCount(): Promise<number>;
   purgePdfContent(fromDate: string, toDate: string): Promise<number>;
+  // Office Costing — expenses / bills
+  createExpense(expense: NewExpense): Promise<Expense>;
+  getExpenses(filters?: { userId?: string; status?: ExpenseStatus; month?: string }): Promise<Expense[]>;
+  getExpenseById(id: number): Promise<Expense | undefined>;
+  updateExpenseStatus(
+    id: number,
+    status: ExpenseStatus,
+    extra?: { rejectionReason?: string | null }
+  ): Promise<Expense | undefined>;
+  deleteExpense(id: number): Promise<boolean>;
+  // Bank statements (Receipts & Payments)
+  createBankStatement(input: {
+    bankName: string;
+    accountNumber?: string | null;
+    month: string;
+    openingBalance: number | string;
+    closingBalance: number | string;
+    sourceFileUrl?: string | null;
+    uploadedBy: string;
+    transactions: Array<{
+      date: string;
+      narration: string;
+      debit?: number | string | null;
+      credit?: number | string | null;
+      balance?: number | string | null;
+      rowIndex: number;
+      category?: string;
+    }>;
+  }): Promise<{ statement: BankStatement; transactions: BankTransaction[] }>;
+  listBankStatements(filters: { month?: string }): Promise<BankStatement[]>;
+  getBankStatementById(id: number): Promise<BankStatement | undefined>;
+  updateBankStatement(id: number, patch: { bankName?: string; accountNumber?: string | null; openingBalance?: number | string; closingBalance?: number | string }): Promise<BankStatement | undefined>;
+  listBankTransactions(statementId: number): Promise<BankTransaction[]>;
+  updateBankTransactionClassification(id: number, patch: { category?: string; comment?: string }): Promise<BankTransaction | undefined>;
+  getLatestClosingBalanceBefore(bankName: string, month: string): Promise<{ month: string; closingBalance: string } | undefined>;
+  findBankStatementForMerge(month: string, bankName: string, accountNumber: string | null): Promise<BankStatement | undefined>;
+  appendBankTransactions(
+    statementId: number,
+    transactions: Array<{
+      date: string;
+      narration: string;
+      debit?: number | string | null;
+      credit?: number | string | null;
+      balance?: number | string | null;
+      rowIndex: number;
+      category?: string;
+    }>,
+    patch?: { accountNumber?: string | null; openingBalance?: number | string; closingBalance?: number | string; sourceFileUrl?: string | null }
+  ): Promise<{ statement: BankStatement; appended: BankTransaction[] }>;
+  deleteBankStatement(id: number): Promise<boolean>;
 }
 
 // In-memory storage for local development (when DATABASE_URL is not set)
 const inMemoryReports: Report[] = [];
 const inMemoryMisEntries: MisEntry[] = [];
+const inMemoryExpenses: Expense[] = [];
+const inMemoryBankStatements: BankStatement[] = [];
+const inMemoryBankTransactions: BankTransaction[] = [];
+const memSeq = { expense: 1, bankStmt: 1, bankTxn: 1 };
+loadDevState();
 
 export class PostgresStorage implements IStorage {
   private get db() {
@@ -101,9 +278,9 @@ export class PostgresStorage implements IStorage {
   async getAssociates(): Promise<User[]> {
     // Fallback to in-memory users when database is not available
     if (!this.hasDatabase) {
-      return DEFAULT_USERS.filter(u => u.id !== 'ADMIN');
+      return DEFAULT_USERS.filter(u => u.id !== 'ADMIN' && u.id !== 'PROP');
     }
-    return await this.db.select().from(users).where(sql`${users.id} != 'ADMIN'`);
+    return await this.db.select().from(users).where(sql`${users.id} NOT IN ('ADMIN', 'PROP')`);
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -121,6 +298,7 @@ export class PostgresStorage implements IStorage {
       const user = DEFAULT_USERS.find(u => u.id === id);
       if (!user) return false;
       user.password = password;
+      saveDevUserOverrides();
       return true;
     }
     const result = await this.db.update(users).set({ password }).where(eq(users.id, id));
@@ -139,6 +317,7 @@ export class PostgresStorage implements IStorage {
         tatDelayRemark: insertReport.tatDelayRemark || null,
       };
       inMemoryReports.push(report);
+      persist();
       return report;
     }
     const result = await this.db.insert(reports).values(insertReport).returning();
@@ -362,6 +541,7 @@ export class PostgresStorage implements IStorage {
         createdAt: new Date(),
       };
       inMemoryMisEntries.push(misEntry);
+      persist();
       return misEntry;
     }
     const result = await this.db.insert(misEntries).values(entry).returning();
@@ -394,6 +574,7 @@ export class PostgresStorage implements IStorage {
         inMemoryMisEntries.push(misEntry);
         results.push(misEntry);
       }
+      persist();
       return results;
     }
     const result = await this.db.insert(misEntries).values(entries).returning();
@@ -406,6 +587,7 @@ export class PostgresStorage implements IStorage {
       const idx = inMemoryMisEntries.findIndex(e => e.id === id);
       if (idx !== -1) {
         inMemoryMisEntries[idx] = { ...inMemoryMisEntries[idx], ...entry };
+        persist();
         return inMemoryMisEntries[idx];
       }
       return undefined;
@@ -525,6 +707,365 @@ export class PostgresStorage implements IStorage {
       sql`UPDATE reports SET pdf_content = NULL WHERE date >= ${fromDate} AND date <= ${toDate} AND pdf_content IS NOT NULL`
     );
     return result.rowCount ?? 0;
+  }
+
+  async createExpense(insertExpense: NewExpense): Promise<Expense> {
+    const now = new Date();
+    const status: ExpenseStatus = insertExpense.status ?? 'pending';
+    const isApproved = status === 'approved' || status === 'paid';
+
+    if (!this.hasDatabase) {
+      const expense: Expense = {
+        id: memSeq.expense++,
+        userId: insertExpense.userId,
+        date: insertExpense.date,
+        category: insertExpense.category,
+        description: insertExpense.description ?? '',
+        amount: String(insertExpense.amount),
+        approverId: insertExpense.approverId,
+        billFileUrl: insertExpense.billFileUrl ?? null,
+        status,
+        approvedAt: isApproved ? now : null,
+        paidAt: status === 'paid' ? now : null,
+        rejectionReason: null,
+        isOwnCost: insertExpense.isOwnCost ?? false,
+        createdAt: now,
+      };
+      inMemoryExpenses.push(expense);
+      persist();
+      return expense;
+    }
+    const values: any = {
+      userId: insertExpense.userId,
+      date: insertExpense.date,
+      category: insertExpense.category,
+      description: insertExpense.description ?? '',
+      amount: String(insertExpense.amount),
+      approverId: insertExpense.approverId,
+      billFileUrl: insertExpense.billFileUrl ?? null,
+      status,
+      isOwnCost: insertExpense.isOwnCost ?? false,
+    };
+    if (isApproved) values.approvedAt = now;
+    if (status === 'paid') values.paidAt = now;
+    const result = await this.db.insert(expenses).values(values).returning();
+    return result[0];
+  }
+
+  async getExpenses(filters?: { userId?: string; status?: ExpenseStatus; month?: string }): Promise<Expense[]> {
+    if (!this.hasDatabase) {
+      let filtered = [...inMemoryExpenses];
+      if (filters?.userId) filtered = filtered.filter(e => e.userId === filters.userId);
+      if (filters?.status) filtered = filtered.filter(e => e.status === filters.status);
+      if (filters?.month) filtered = filtered.filter(e => e.date?.startsWith(filters.month!));
+      return filtered.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id);
+    }
+    const conditions: any[] = [];
+    if (filters?.userId) conditions.push(eq(expenses.userId, filters.userId));
+    if (filters?.status) conditions.push(eq(expenses.status, filters.status));
+    if (filters?.month) conditions.push(sql`${expenses.date} LIKE ${filters.month + '%'}`);
+    const q = conditions.length
+      ? this.db.select().from(expenses).where(and(...conditions))
+      : this.db.select().from(expenses);
+    return await q.orderBy(sql`${expenses.date} DESC, ${expenses.id} DESC`) as Expense[];
+  }
+
+  async getExpenseById(id: number): Promise<Expense | undefined> {
+    if (!this.hasDatabase) {
+      return inMemoryExpenses.find(e => e.id === id);
+    }
+    const result = await this.db.select().from(expenses).where(eq(expenses.id, id)).limit(1);
+    return result[0];
+  }
+
+  async updateExpenseStatus(
+    id: number,
+    status: ExpenseStatus,
+    extra?: { rejectionReason?: string | null }
+  ): Promise<Expense | undefined> {
+    const now = new Date();
+    const patch: Record<string, any> = { status };
+    if (status === 'approved') patch.approvedAt = now;
+    if (status === 'paid') patch.paidAt = now;
+    if (status === 'rejected') patch.rejectionReason = extra?.rejectionReason ?? null;
+
+    if (!this.hasDatabase) {
+      const idx = inMemoryExpenses.findIndex(e => e.id === id);
+      if (idx === -1) return undefined;
+      inMemoryExpenses[idx] = { ...inMemoryExpenses[idx], ...patch } as Expense;
+      persist();
+      return inMemoryExpenses[idx];
+    }
+    const result = await this.db.update(expenses)
+      .set(patch as any)
+      .where(eq(expenses.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteExpense(id: number): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const idx = inMemoryExpenses.findIndex(e => e.id === id);
+      if (idx === -1) return false;
+      inMemoryExpenses.splice(idx, 1);
+      persist();
+      return true;
+    }
+    const result = await this.db.delete(expenses).where(eq(expenses.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async createBankStatement(input: {
+    bankName: string;
+    accountNumber?: string | null;
+    month: string;
+    openingBalance: number | string;
+    closingBalance: number | string;
+    sourceFileUrl?: string | null;
+    uploadedBy: string;
+    transactions: Array<{
+      date: string;
+      narration: string;
+      debit?: number | string | null;
+      credit?: number | string | null;
+      balance?: number | string | null;
+      rowIndex: number;
+      category?: string;
+    }>;
+  }): Promise<{ statement: BankStatement; transactions: BankTransaction[] }> {
+    const now = new Date();
+    if (!this.hasDatabase) {
+      const stmt: BankStatement = {
+        id: memSeq.bankStmt++,
+        bankName: input.bankName,
+        accountNumber: input.accountNumber ?? null,
+        month: input.month,
+        openingBalance: String(input.openingBalance),
+        closingBalance: String(input.closingBalance),
+        sourceFileUrl: input.sourceFileUrl ?? null,
+        uploadedBy: input.uploadedBy,
+        createdAt: now,
+      };
+      inMemoryBankStatements.push(stmt);
+      const txns: BankTransaction[] = input.transactions.map(t => ({
+        id: memSeq.bankTxn++,
+        statementId: stmt.id,
+        date: t.date,
+        narration: t.narration || '',
+        debit: t.debit != null ? String(t.debit) : null,
+        credit: t.credit != null ? String(t.credit) : null,
+        balance: t.balance != null ? String(t.balance) : null,
+        category: t.category || 'Unclassified',
+        comment: '',
+        rowIndex: t.rowIndex,
+      }));
+      inMemoryBankTransactions.push(...txns);
+      persist();
+      return { statement: stmt, transactions: txns };
+    }
+    const stmtRes = await this.db.insert(bankStatements).values({
+      bankName: input.bankName,
+      accountNumber: input.accountNumber ?? null,
+      month: input.month,
+      openingBalance: String(input.openingBalance),
+      closingBalance: String(input.closingBalance),
+      sourceFileUrl: input.sourceFileUrl ?? null,
+      uploadedBy: input.uploadedBy,
+    } as any).returning();
+    const stmt = stmtRes[0];
+    let txns: BankTransaction[] = [];
+    if (input.transactions.length > 0) {
+      const rows = input.transactions.map(t => ({
+        statementId: stmt.id,
+        date: t.date,
+        narration: t.narration || '',
+        debit: t.debit != null ? String(t.debit) : null,
+        credit: t.credit != null ? String(t.credit) : null,
+        balance: t.balance != null ? String(t.balance) : null,
+        rowIndex: t.rowIndex,
+        ...(t.category ? { category: t.category } : {}),
+      }));
+      txns = await this.db.insert(bankTransactions).values(rows as any).returning() as BankTransaction[];
+    }
+    return { statement: stmt, transactions: txns };
+  }
+
+  async listBankStatements(filters: { month?: string }): Promise<BankStatement[]> {
+    if (!this.hasDatabase) {
+      let list = [...inMemoryBankStatements];
+      if (filters.month) list = list.filter(s => s.month === filters.month);
+      return list.sort((a, b) => a.bankName.localeCompare(b.bankName));
+    }
+    const q = filters.month
+      ? this.db.select().from(bankStatements).where(eq(bankStatements.month, filters.month))
+      : this.db.select().from(bankStatements);
+    return await q.orderBy(bankStatements.bankName) as BankStatement[];
+  }
+
+  async getBankStatementById(id: number): Promise<BankStatement | undefined> {
+    if (!this.hasDatabase) return inMemoryBankStatements.find(s => s.id === id);
+    const r = await this.db.select().from(bankStatements).where(eq(bankStatements.id, id)).limit(1);
+    return r[0];
+  }
+
+  async updateBankStatement(id: number, patch: { bankName?: string; accountNumber?: string | null; openingBalance?: number | string; closingBalance?: number | string }): Promise<BankStatement | undefined> {
+    const next: Record<string, any> = {};
+    if (patch.bankName !== undefined) next.bankName = patch.bankName;
+    if (patch.accountNumber !== undefined) next.accountNumber = patch.accountNumber;
+    if (patch.openingBalance !== undefined) next.openingBalance = String(patch.openingBalance);
+    if (patch.closingBalance !== undefined) next.closingBalance = String(patch.closingBalance);
+    if (Object.keys(next).length === 0) {
+      return this.getBankStatementById(id);
+    }
+    if (!this.hasDatabase) {
+      const stmt = inMemoryBankStatements.find(s => s.id === id);
+      if (!stmt) return undefined;
+      Object.assign(stmt, next);
+      persist();
+      return stmt;
+    }
+    const result = await this.db.update(bankStatements).set(next).where(eq(bankStatements.id, id)).returning();
+    return result[0];
+  }
+
+  async listBankTransactions(statementId: number): Promise<BankTransaction[]> {
+    if (!this.hasDatabase) {
+      return inMemoryBankTransactions
+        .filter(t => t.statementId === statementId)
+        .sort((a, b) => a.rowIndex - b.rowIndex || a.id - b.id);
+    }
+    return await this.db.select().from(bankTransactions)
+      .where(eq(bankTransactions.statementId, statementId))
+      .orderBy(bankTransactions.rowIndex, bankTransactions.id) as BankTransaction[];
+  }
+
+  async updateBankTransactionClassification(id: number, patch: { category?: string; comment?: string }): Promise<BankTransaction | undefined> {
+    const next: Record<string, any> = {};
+    if (patch.category !== undefined) next.category = patch.category;
+    if (patch.comment !== undefined) next.comment = patch.comment;
+    if (Object.keys(next).length === 0) {
+      return this.hasDatabase
+        ? (await this.db.select().from(bankTransactions).where(eq(bankTransactions.id, id)).limit(1))[0]
+        : inMemoryBankTransactions.find(t => t.id === id);
+    }
+    if (!this.hasDatabase) {
+      const idx = inMemoryBankTransactions.findIndex(t => t.id === id);
+      if (idx === -1) return undefined;
+      inMemoryBankTransactions[idx] = { ...inMemoryBankTransactions[idx], ...next } as BankTransaction;
+      persist();
+      return inMemoryBankTransactions[idx];
+    }
+    const r = await this.db.update(bankTransactions).set(next as any).where(eq(bankTransactions.id, id)).returning();
+    return r[0];
+  }
+
+  async getLatestClosingBalanceBefore(bankName: string, month: string): Promise<{ month: string; closingBalance: string } | undefined> {
+    if (!this.hasDatabase) {
+      const candidates = inMemoryBankStatements
+        .filter(s => s.bankName === bankName && s.month < month)
+        .sort((a, b) => b.month.localeCompare(a.month));
+      const top = candidates[0];
+      return top ? { month: top.month, closingBalance: top.closingBalance } : undefined;
+    }
+    const rows = await this.db.select().from(bankStatements)
+      .where(and(eq(bankStatements.bankName, bankName), sql`${bankStatements.month} < ${month}`))
+      .orderBy(desc(bankStatements.month))
+      .limit(1) as BankStatement[];
+    const top = rows[0];
+    return top ? { month: top.month, closingBalance: top.closingBalance } : undefined;
+  }
+
+  async findBankStatementForMerge(month: string, bankName: string, accountNumber: string | null): Promise<BankStatement | undefined> {
+    const wantBank = bankName.trim().toLowerCase();
+    const wantAcc = (accountNumber ?? '').trim();
+    const sameMonth = await this.listBankStatements({ month });
+    const sameBank = sameMonth.filter(s => s.bankName.trim().toLowerCase() === wantBank);
+    if (sameBank.length === 0) return undefined;
+    if (!wantAcc) return undefined;
+    const exact = sameBank.find(s => (s.accountNumber ?? '').trim() === wantAcc);
+    if (exact) return exact;
+    return sameBank.find(s => !(s.accountNumber ?? '').trim());
+  }
+
+  async appendBankTransactions(
+    statementId: number,
+    transactions: Array<{
+      date: string;
+      narration: string;
+      debit?: number | string | null;
+      credit?: number | string | null;
+      balance?: number | string | null;
+      rowIndex: number;
+      category?: string;
+    }>,
+    patch?: { accountNumber?: string | null; openingBalance?: number | string; closingBalance?: number | string; sourceFileUrl?: string | null }
+  ): Promise<{ statement: BankStatement; appended: BankTransaction[] }> {
+    const nextPatch: Record<string, any> = {};
+    if (patch?.accountNumber !== undefined) nextPatch.accountNumber = patch.accountNumber;
+    if (patch?.openingBalance !== undefined) nextPatch.openingBalance = String(patch.openingBalance);
+    if (patch?.closingBalance !== undefined) nextPatch.closingBalance = String(patch.closingBalance);
+    if (patch?.sourceFileUrl !== undefined) nextPatch.sourceFileUrl = patch.sourceFileUrl;
+
+    if (!this.hasDatabase) {
+      const stmt = inMemoryBankStatements.find(s => s.id === statementId);
+      if (!stmt) throw new Error("Statement not found");
+      if (Object.keys(nextPatch).length > 0) Object.assign(stmt, nextPatch);
+      const appended: BankTransaction[] = transactions.map(t => ({
+        id: memSeq.bankTxn++,
+        statementId,
+        date: t.date,
+        narration: t.narration || '',
+        debit: t.debit != null ? String(t.debit) : null,
+        credit: t.credit != null ? String(t.credit) : null,
+        balance: t.balance != null ? String(t.balance) : null,
+        category: t.category || 'Unclassified',
+        comment: '',
+        rowIndex: t.rowIndex,
+      }));
+      inMemoryBankTransactions.push(...appended);
+      persist();
+      return { statement: stmt, appended };
+    }
+
+    let stmt: BankStatement | undefined;
+    if (Object.keys(nextPatch).length > 0) {
+      const r = await this.db.update(bankStatements).set(nextPatch).where(eq(bankStatements.id, statementId)).returning();
+      stmt = r[0];
+    } else {
+      stmt = await this.getBankStatementById(statementId);
+    }
+    if (!stmt) throw new Error("Statement not found");
+
+    let appended: BankTransaction[] = [];
+    if (transactions.length > 0) {
+      const rows = transactions.map(t => ({
+        statementId,
+        date: t.date,
+        narration: t.narration || '',
+        debit: t.debit != null ? String(t.debit) : null,
+        credit: t.credit != null ? String(t.credit) : null,
+        balance: t.balance != null ? String(t.balance) : null,
+        rowIndex: t.rowIndex,
+        ...(t.category ? { category: t.category } : {}),
+      }));
+      appended = await this.db.insert(bankTransactions).values(rows as any).returning() as BankTransaction[];
+    }
+    return { statement: stmt, appended };
+  }
+
+  async deleteBankStatement(id: number): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const idx = inMemoryBankStatements.findIndex(s => s.id === id);
+      if (idx === -1) return false;
+      inMemoryBankStatements.splice(idx, 1);
+      for (let i = inMemoryBankTransactions.length - 1; i >= 0; i--) {
+        if (inMemoryBankTransactions[i].statementId === id) inMemoryBankTransactions.splice(i, 1);
+      }
+      persist();
+      return true;
+    }
+    const r = await this.db.delete(bankStatements).where(eq(bankStatements.id, id));
+    return (r.rowCount ?? 0) > 0;
   }
 }
 

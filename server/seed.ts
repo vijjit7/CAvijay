@@ -8,7 +8,7 @@ const USERS = [
     password: 'password@123',
     name: 'Admin',
     role: 'System Administrator',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&q=80'
+    avatar: ''
   },
   {
     id: 'A1',
@@ -16,7 +16,7 @@ const USERS = [
     password: 'password123',
     name: 'Bharat',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=150&q=80'
+    avatar: ''
   },
   {
     id: 'A2',
@@ -24,7 +24,7 @@ const USERS = [
     password: 'password123',
     name: 'Narender',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80'
+    avatar: ''
   },
   {
     id: 'A3',
@@ -32,7 +32,7 @@ const USERS = [
     password: 'password123',
     name: 'Upender',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=150&q=80'
+    avatar: ''
   },
   {
     id: 'A4',
@@ -40,7 +40,7 @@ const USERS = [
     password: 'password123',
     name: 'Avinash',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=150&q=80'
+    avatar: ''
   },
   {
     id: 'A5',
@@ -48,7 +48,7 @@ const USERS = [
     password: 'password123',
     name: 'Prashanth',
     role: 'Verification Officer',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&q=80'
+    avatar: ''
   }
 ];
 

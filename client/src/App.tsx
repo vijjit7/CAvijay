@@ -13,6 +13,11 @@ import MisPage from "@/pages/mis";
 import MisDashboardPage from "@/pages/mis-dashboard";
 import CreateReportPage from "@/pages/create-report";
 import AssociatesPage from "@/pages/associates";
+import BillPage from "@/pages/bill";
+import OfficeCostingPage from "@/pages/office-costing";
+import ReceiptsAndPaymentsPage from "@/pages/receipts-and-payments";
+import ReceiptsAndPaymentsStatementPage from "@/pages/receipts-and-payments-statement";
+import ReceiptsAndPaymentsBreakdownPage from "@/pages/receipts-and-payments-breakdown";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuditProvider } from "@/lib/audit-context";
 import { ChangePasswordGate } from "@/components/change-password-gate";
@@ -53,6 +58,21 @@ function Router() {
       </Route>
       <Route path="/associates">
         <ProtectedRoute component={AssociatesPage} />
+      </Route>
+      <Route path="/bill">
+        <ProtectedRoute component={BillPage} />
+      </Route>
+      <Route path="/office-costing">
+        <ProtectedRoute component={OfficeCostingPage} />
+      </Route>
+      <Route path="/receipts-and-payments">
+        <ProtectedRoute component={ReceiptsAndPaymentsPage} />
+      </Route>
+      <Route path="/receipts-and-payments/statement">
+        <ProtectedRoute component={ReceiptsAndPaymentsStatementPage} />
+      </Route>
+      <Route path="/receipts-and-payments/breakdown">
+        <ProtectedRoute component={ReceiptsAndPaymentsBreakdownPage} />
       </Route>
       <Route path="/analytics">
         <ProtectedRoute component={ReportsPage} />
