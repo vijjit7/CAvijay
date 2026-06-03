@@ -2187,7 +2187,7 @@ showpage
           const mimeType = audioFile.mimetype || 'audio/webm';
           
           const transcriptionResponse = await openai.chat.completions.create({
-            model: "google/gemini-2.0-flash-001",
+            model: "google/gemini-2.5-flash",
             messages: [
               {
                 role: "user",
@@ -2229,7 +2229,7 @@ showpage
             const mimeType = photo.mimetype || 'image/jpeg';
             
             const visionResponse = await openai.chat.completions.create({
-              model: "google/gemini-2.0-flash-001",
+              model: "google/gemini-2.5-flash",
               messages: [
                 {
                   role: "user",
@@ -2370,7 +2370,8 @@ Extract as much information as possible from the audio transcription and photo d
       });
 
       const content = response.choices[0]?.message?.content || "";
-      
+      console.log(`[Generate Draft - ${leadId}] AI report content length: ${content.length}, preview: ${content.substring(0, 200)}`);
+
       // Parse the JSON response
       let draft;
       try {
@@ -2381,7 +2382,12 @@ Extract as much information as possible from the audio transcription and photo d
           throw new Error("No JSON found");
         }
       } catch (parseError) {
-        // Fallback draft in LIP Report format if AI response can't be parsed
+        // Fallback draft in LIP Report format if AI response can't be parsed.
+        // If we land here it usually means the AI call returned nothing usable
+        // (bad/expired OPENROUTER_API_KEY, no credits, or a deprecated model) —
+        // log loudly so it is diagnosable instead of silently shipping "Not Available".
+        console.error(`[Generate Draft - ${leadId}] AI response not parseable — returning fallback template. ` +
+          `Raw content length: ${content.length}. This is expected only if the model returned non-JSON.`);
         const today = new Date();
         draft = {
           leadId,
@@ -2509,9 +2515,10 @@ Extract as much information as possible from the audio transcription and photo d
         }
       });
 
-    } catch (error) {
-      console.error("Generate draft report error:", error);
-      return res.status(500).json({ error: "Failed to generate draft report" });
+    } catch (error: any) {
+      const detail = error?.message || String(error);
+      console.error("Generate draft report error:", { message: detail, status: error?.status, code: error?.code });
+      return res.status(500).json({ error: `Failed to generate draft report: ${detail}` });
     }
   });
 
