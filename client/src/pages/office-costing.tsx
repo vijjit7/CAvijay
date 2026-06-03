@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Check, X, IndianRupee, Paperclip, Trash2, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { EXPENSE_CATEGORIES, type Expense, type ExpenseStatus } from "@shared/schema";
+import { EXPENSE_CATEGORIES, PAYMENT_MODES, type Expense, type ExpenseStatus, type ExpensePayment } from "@shared/schema";
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell,
 } from "recharts";
@@ -40,6 +40,10 @@ function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+// Manual part-payment helpers: total recorded against a bill and the net still due.
+const paymentsOf = (e: Expense): ExpensePayment[] => (e.payments as ExpensePayment[] | undefined) ?? [];
+const paidSum = (e: Expense) => paymentsOf(e).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+const netDue = (e: Expense) => Math.max(0, (parseFloat(String(e.amount)) || 0) - paidSum(e));
 function monthISO(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -88,6 +92,13 @@ export default function OfficeCostingPage() {
   const [loadingApprovals, setLoadingApprovals] = useState(true);
   const [rejecting, setRejecting] = useState<Expense | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  // Part-payment dialog state
+  const [paying, setPaying] = useState<Expense | null>(null);
+  const [payDate, setPayDate] = useState(todayISO());
+  const [payVia, setPayVia] = useState<string>(PAYMENT_MODES[0]);
+  const [payAmt, setPayAmt] = useState("");
+  const [paySubmitting, setPaySubmitting] = useState(false);
 
   // My Submissions tab state
   const [own, setOwn] = useState<Expense[]>([]);
@@ -181,6 +192,46 @@ export default function OfficeCostingPage() {
     if (!confirm("Delete this expense?")) return;
     const r = await fetch(`/api/expenses/${id}`, { method: "DELETE", credentials: "include" });
     if (r.ok) { toast({ title: "Deleted" }); loadApprovals(); loadOwn(); }
+  }
+
+  function openPayments(e: Expense) {
+    setPaying(e);
+    setPayDate(todayISO());
+    setPayVia(PAYMENT_MODES[0]);
+    setPayAmt(String(netDue(e) || ""));   // pre-fill with the net due for a one-shot full payment
+    setPaySubmitting(false);
+  }
+  async function addPayment() {
+    if (!paying) return;
+    const amt = parseFloat(payAmt);
+    if (!payDate) { toast({ title: "Payment date required", variant: "destructive" }); return; }
+    if (!Number.isFinite(amt) || amt <= 0) { toast({ title: "Enter a valid amount", variant: "destructive" }); return; }
+    setPaySubmitting(true);
+    try {
+      const r = await fetch(`/api/expenses/${paying.id}/payments`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: payDate, paidVia: payVia, amount: amt }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setPaying(data);                  // refresh dialog with the updated bill
+        setPayAmt(String(netDue(data) || ""));
+        toast({ title: netDue(data) <= 0 ? "Fully paid" : "Payment recorded" });
+        loadApprovals();
+      } else {
+        toast({ title: "Payment failed", description: data.error, variant: "destructive" });
+      }
+    } finally {
+      setPaySubmitting(false);
+    }
+  }
+  async function removePayment(index: number) {
+    if (!paying) return;
+    const r = await fetch(`/api/expenses/${paying.id}/payments/${index}`, { method: "DELETE", credentials: "include" });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) { setPaying(data); setPayAmt(String(netDue(data) || "")); loadApprovals(); }
+    else { toast({ title: "Could not remove payment", description: data.error, variant: "destructive" }); }
   }
 
   async function submitOwn() {
@@ -374,7 +425,15 @@ export default function OfficeCostingPage() {
                         <TableCell>{userName(e.userId)}{e.isOwnCost && <span className="text-xs text-muted-foreground ml-1">(own)</span>}</TableCell>
                         <TableCell>{e.category}</TableCell>
                         <TableCell className="text-muted-foreground">{e.description || "—"}</TableCell>
-                        <TableCell className="text-right font-medium">{fmt(e.amount)}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {fmt(e.amount)}
+                          {!e.isOwnCost && paidSum(e) > 0 && (
+                            <div className="text-xs font-normal text-muted-foreground">
+                              paid {fmt(paidSum(e))}
+                              {netDue(e) > 0 && <> · <span className="text-amber-700 font-medium">due {fmt(netDue(e))}</span></>}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell>
                           {e.billFileUrl ? (
                             <a href={e.billFileUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
@@ -384,6 +443,9 @@ export default function OfficeCostingPage() {
                         </TableCell>
                         <TableCell>
                           <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${s.cls}`}>{s.label}</span>
+                          {e.status === "approved" && !e.isOwnCost && paidSum(e) > 0 && netDue(e) > 0 && (
+                            <div className="text-xs text-amber-700 mt-1">Partially paid</div>
+                          )}
                           {e.status === "rejected" && e.rejectionReason && (
                             <div className="text-xs text-red-600 mt-1">{e.rejectionReason}</div>
                           )}
@@ -400,7 +462,13 @@ export default function OfficeCostingPage() {
                               <span className="text-xs text-muted-foreground italic">awaiting {APPROVER_LABEL[e.approverId] || e.approverId}</span>
                             )}
                             {e.status === "approved" && !e.isOwnCost && (
-                              <Button size="sm" variant="outline" onClick={() => act(e.id, "mark-paid")}>Mark Paid</Button>
+                              <Button size="sm" variant="outline" onClick={() => openPayments(e)} title="Record payment">
+                                <IndianRupee size={14} className="mr-1" />
+                                {paidSum(e) > 0 ? `${fmt(netDue(e))} due` : "Record payment"}
+                              </Button>
+                            )}
+                            {e.status === "paid" && !e.isOwnCost && (
+                              <Button size="sm" variant="ghost" onClick={() => openPayments(e)} title="View payments">Payments</Button>
                             )}
                             {e.status === "approved" && e.isOwnCost && (
                               <span className="text-xs text-muted-foreground italic">settled</span>
@@ -658,6 +726,96 @@ export default function OfficeCostingPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setRejecting(null)}>Cancel</Button>
               <Button variant="destructive" onClick={reject}>Reject</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Part-payment dialog: record manual payments against an approved bill */}
+        <Dialog open={!!paying} onOpenChange={(o) => !o && setPaying(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Record payment</DialogTitle>
+              <DialogDescription>
+                {paying && <>{userName(paying.userId)} · {paying.category} · approved {fmt(paying.amount)}</>}
+              </DialogDescription>
+            </DialogHeader>
+
+            {paying && (
+              <div className="space-y-4">
+                {/* Approved / paid / net summary */}
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <div className="text-xs text-muted-foreground">Approved</div>
+                    <div className="font-semibold">{fmt(paying.amount)}</div>
+                  </div>
+                  <div className="rounded-md bg-green-50 p-2">
+                    <div className="text-xs text-muted-foreground">Paid till date</div>
+                    <div className="font-semibold text-green-700">{fmt(paidSum(paying))}</div>
+                  </div>
+                  <div className="rounded-md bg-amber-50 p-2">
+                    <div className="text-xs text-muted-foreground">Net to be paid</div>
+                    <div className="font-semibold text-amber-700">{fmt(netDue(paying))}</div>
+                  </div>
+                </div>
+
+                {/* Recorded payment rows */}
+                <div className="rounded-md border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Paid via</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="w-8"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentsOf(paying).length === 0 ? (
+                        <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-3 text-sm">No payments recorded yet.</TableCell></TableRow>
+                      ) : paymentsOf(paying).map((p, i) => (
+                        <TableRow key={i}>
+                          <TableCell>{p.date}</TableCell>
+                          <TableCell>{p.paidVia}</TableCell>
+                          <TableCell className="text-right font-medium">{fmt(p.amount)}</TableCell>
+                          <TableCell>
+                            <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 h-7 w-7" onClick={() => removePayment(i)} title="Remove payment"><Trash2 size={14} /></Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Add a new payment row */}
+                {netDue(paying) > 0 ? (
+                  <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Date</Label>
+                      <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Paid via</Label>
+                      <Select value={payVia} onValueChange={setPayVia}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_MODES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Amount (₹)</Label>
+                      <Input type="number" min="0" step="0.01" value={payAmt} onChange={e => setPayAmt(e.target.value)} />
+                    </div>
+                    <Button onClick={addPayment} disabled={paySubmitting}>{paySubmitting ? "Saving…" : "Add"}</Button>
+                  </div>
+                ) : (
+                  <div className="text-sm text-green-700 font-medium text-center">This bill is fully paid.</div>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPaying(null)}>Close</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

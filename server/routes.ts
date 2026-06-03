@@ -4401,6 +4401,66 @@ showpage
     }
   });
 
+  // POST /api/expenses/:id/payments — approver records a part-payment against an
+  // approved bill. Payments are manual (no gateway), so each row carries date,
+  // mode and amount. The bill flips to 'paid' automatically once the net is cleared.
+  app.post("/api/expenses/:id/payments", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      if (exp.isOwnCost) return res.status(400).json({ error: "Own office costs are settled at approval and do not take part-payments" });
+      if (exp.status !== 'approved' && exp.status !== 'paid') {
+        return res.status(400).json({ error: `Only approved bills can be paid (this one is '${exp.status}')` });
+      }
+
+      const { date, paidVia, amount } = req.body ?? {};
+      const amt = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+      if (!date || typeof date !== 'string') return res.status(400).json({ error: "Payment date is required" });
+      if (!paidVia || typeof paidVia !== 'string') return res.status(400).json({ error: "Paid via is required" });
+      if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
+
+      const billTotal = parseFloat(String(exp.amount)) || 0;
+      const alreadyPaid = (exp.payments ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      // Guard against over-paying beyond the approved amount (small float tolerance).
+      if (Math.round((alreadyPaid + amt) * 100) > Math.round(billTotal * 100) + 1) {
+        const remaining = Math.max(0, billTotal - alreadyPaid);
+        return res.status(400).json({ error: `Payment exceeds the net due of ₹${remaining.toFixed(2)}` });
+      }
+
+      const updated = await storage.addExpensePayment(id, {
+        date,
+        paidVia: paidVia.trim(),
+        amount: Math.round(amt * 100) / 100,
+      });
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Add expense payment error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/expenses/:id/payments/:index — approver removes a recorded
+  // part-payment (correcting a mistake). Status recomputes from the remaining rows.
+  app.delete("/api/expenses/:id/payments/:index", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const id = parseInt(req.params.id, 10);
+      const index = parseInt(req.params.index, 10);
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "Expense not found" });
+      if (!Number.isInteger(index) || index < 0 || index >= (exp.payments ?? []).length) {
+        return res.status(400).json({ error: "Invalid payment row" });
+      }
+      const updated = await storage.removeExpensePayment(id, index);
+      return res.json(updated);
+    } catch (error: any) {
+      console.error("Remove expense payment error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // DELETE /api/expenses/:id — owner may delete pending; admin may delete anything
   app.delete("/api/expenses/:id", async (req, res) => {
     try {

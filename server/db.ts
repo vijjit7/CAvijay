@@ -69,8 +69,11 @@ export async function ensureSchema(): Promise<void> {
       paid_at timestamp,
       rejection_reason text,
       is_own_cost boolean NOT NULL DEFAULT false,
+      payments jsonb NOT NULL DEFAULT '[]',
       created_at timestamp NOT NULL DEFAULT now()
     );
+    -- Backfill the part-payments column on expenses tables created before it existed.
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]';
     CREATE TABLE IF NOT EXISTS bank_statements (
       id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       bank_name text NOT NULL,

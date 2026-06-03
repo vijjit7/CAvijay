@@ -333,6 +333,18 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 
 export const EXPENSE_STATUSES: ExpenseStatus[] = ['pending', 'approved', 'paid', 'rejected'];
 
+// Manual part-payment tracking. Payments are not integrated to a gateway, so the
+// approver records each disbursement against an approved bill. Net to be paid =
+// approved amount − sum(payments). When the net reaches zero the bill is 'paid'.
+export const PAYMENT_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'Card', 'Other'] as const;
+export type PaymentMode = typeof PAYMENT_MODES[number];
+
+export type ExpensePayment = {
+  date: string;       // 'YYYY-MM-DD'
+  paidVia: string;    // one of PAYMENT_MODES (free text tolerated)
+  amount: number;     // positive rupee amount
+};
+
 export const expenses = pgTable("expenses", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   userId: varchar("user_id", { length: 10 }).notNull().references(() => users.id),
@@ -347,6 +359,7 @@ export const expenses = pgTable("expenses", {
   paidAt: timestamp("paid_at"),
   rejectionReason: text("rejection_reason"),
   isOwnCost: boolean("is_own_cost").default(false).notNull(),
+  payments: jsonb("payments").$type<ExpensePayment[]>().default([]).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -355,6 +368,7 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({
   createdAt: true,
   approvedAt: true,
   paidAt: true,
+  payments: true,
 });
 
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;

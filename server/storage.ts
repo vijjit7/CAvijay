@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bankStatements, bankTransactions } from "@shared/schema";
+import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bankStatements, bankTransactions } from "@shared/schema";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -208,6 +208,8 @@ export interface IStorage {
     status: ExpenseStatus,
     extra?: { rejectionReason?: string | null }
   ): Promise<Expense | undefined>;
+  addExpensePayment(id: number, payment: ExpensePayment): Promise<Expense | undefined>;
+  removeExpensePayment(id: number, index: number): Promise<Expense | undefined>;
   deleteExpense(id: number): Promise<boolean>;
   // Bank statements (Receipts & Payments)
   createBankStatement(input: {
@@ -764,6 +766,7 @@ export class PostgresStorage implements IStorage {
         paidAt: status === 'paid' ? now : null,
         rejectionReason: null,
         isOwnCost: insertExpense.isOwnCost ?? false,
+        payments: [],
         createdAt: now,
       };
       inMemoryExpenses.push(expense);
@@ -833,6 +836,63 @@ export class PostgresStorage implements IStorage {
     }
     const result = await this.db.update(expenses)
       .set(patch as any)
+      .where(eq(expenses.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Apply a new/edited payments list to an expense and derive its status:
+  // fully covered → 'paid' (stamp paidAt), otherwise keep it 'approved' (clear paidAt).
+  // Returns the persisted row, or undefined if not found / not in a payable state.
+  private buildPaymentPatch(exp: Expense, payments: ExpensePayment[], now: Date): Record<string, any> {
+    const total = parseFloat(String(exp.amount)) || 0;
+    const paid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    // round to paise to avoid float dust deciding fully-paid
+    const fullyPaid = Math.round(paid * 100) >= Math.round(total * 100);
+    return {
+      payments,
+      status: fullyPaid ? 'paid' : 'approved',
+      paidAt: fullyPaid ? (exp.paidAt ?? now) : null,
+    };
+  }
+
+  async addExpensePayment(id: number, payment: ExpensePayment): Promise<Expense | undefined> {
+    const now = new Date();
+    if (!this.hasDatabase) {
+      const idx = inMemoryExpenses.findIndex(e => e.id === id);
+      if (idx === -1) return undefined;
+      const exp = inMemoryExpenses[idx];
+      const payments = [...(exp.payments ?? []), payment];
+      inMemoryExpenses[idx] = { ...exp, ...this.buildPaymentPatch(exp, payments, now) } as Expense;
+      persist();
+      return inMemoryExpenses[idx];
+    }
+    const exp = await this.getExpenseById(id);
+    if (!exp) return undefined;
+    const payments = [...(exp.payments ?? []), payment];
+    const result = await this.db.update(expenses)
+      .set(this.buildPaymentPatch(exp, payments, now) as any)
+      .where(eq(expenses.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async removeExpensePayment(id: number, index: number): Promise<Expense | undefined> {
+    const now = new Date();
+    if (!this.hasDatabase) {
+      const idx = inMemoryExpenses.findIndex(e => e.id === id);
+      if (idx === -1) return undefined;
+      const exp = inMemoryExpenses[idx];
+      const payments = (exp.payments ?? []).filter((_, i) => i !== index);
+      inMemoryExpenses[idx] = { ...exp, ...this.buildPaymentPatch(exp, payments, now) } as Expense;
+      persist();
+      return inMemoryExpenses[idx];
+    }
+    const exp = await this.getExpenseById(id);
+    if (!exp) return undefined;
+    const payments = (exp.payments ?? []).filter((_, i) => i !== index);
+    const result = await this.db.update(expenses)
+      .set(this.buildPaymentPatch(exp, payments, now) as any)
       .where(eq(expenses.id, id))
       .returning();
     return result[0];
