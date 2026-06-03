@@ -93,12 +93,21 @@ export default function OfficeCostingPage() {
   const [rejecting, setRejecting] = useState<Expense | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  // Part-payment dialog state
-  const [paying, setPaying] = useState<Expense | null>(null);
-  const [payDate, setPayDate] = useState(todayISO());
-  const [payVia, setPayVia] = useState<string>(PAYMENT_MODES[0]);
-  const [payAmt, setPayAmt] = useState("");
-  const [paySubmitting, setPaySubmitting] = useState(false);
+  // Per-bill payments view (read-only — money flows in via bulk payments)
+  const [viewing, setViewing] = useState<Expense | null>(null);
+
+  // Balance summary (outstanding owed + unadjusted advance/credit)
+  const [balance, setBalance] = useState<{ outstandingTotal: number; creditBalance: number; bulkPayments: any[] }>({
+    outstandingTotal: 0, creditBalance: 0, bulkPayments: [],
+  });
+
+  // Bulk (lump-sum) payment dialog state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDate, setBulkDate] = useState(todayISO());
+  const [bulkVia, setBulkVia] = useState<string>(PAYMENT_MODES[0]);
+  const [bulkAmt, setBulkAmt] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ recorded: number; allocatedCount: number; creditBalance: number } | null>(null);
 
   // My Submissions tab state
   const [own, setOwn] = useState<Expense[]>([]);
@@ -166,7 +175,7 @@ export default function OfficeCostingPage() {
   }
 
   useEffect(() => {
-    if (tab === "approvals") loadApprovals();
+    if (tab === "approvals") { loadApprovals(); loadBalance(); }
     else if (tab === "own") loadOwn();
     else if (tab === "report") loadReport();
     /* eslint-disable-next-line */
@@ -194,44 +203,41 @@ export default function OfficeCostingPage() {
     if (r.ok) { toast({ title: "Deleted" }); loadApprovals(); loadOwn(); }
   }
 
-  function openPayments(e: Expense) {
-    setPaying(e);
-    setPayDate(todayISO());
-    setPayVia(PAYMENT_MODES[0]);
-    setPayAmt(String(netDue(e) || ""));   // pre-fill with the net due for a one-shot full payment
-    setPaySubmitting(false);
+  async function loadBalance() {
+    const r = await fetch(`/api/expenses/balance`, { credentials: "include" });
+    if (r.ok) setBalance(await r.json());
   }
-  async function addPayment() {
-    if (!paying) return;
-    const amt = parseFloat(payAmt);
-    if (!payDate) { toast({ title: "Payment date required", variant: "destructive" }); return; }
+  function openBulk() {
+    setBulkDate(todayISO());
+    setBulkVia(PAYMENT_MODES[0]);
+    setBulkAmt("");
+    setBulkResult(null);
+    setBulkSubmitting(false);
+    setBulkOpen(true);
+  }
+  async function recordBulk() {
+    const amt = parseFloat(bulkAmt);
+    if (!bulkDate) { toast({ title: "Payment date required", variant: "destructive" }); return; }
     if (!Number.isFinite(amt) || amt <= 0) { toast({ title: "Enter a valid amount", variant: "destructive" }); return; }
-    setPaySubmitting(true);
+    setBulkSubmitting(true);
     try {
-      const r = await fetch(`/api/expenses/${paying.id}/payments`, {
+      const r = await fetch(`/api/expenses/bulk-payment`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: payDate, paidVia: payVia, amount: amt }),
+        body: JSON.stringify({ date: bulkDate, paidVia: bulkVia, amount: amt }),
       });
       const data = await r.json().catch(() => ({}));
       if (r.ok) {
-        setPaying(data);                  // refresh dialog with the updated bill
-        setPayAmt(String(netDue(data) || ""));
-        toast({ title: netDue(data) <= 0 ? "Fully paid" : "Payment recorded" });
+        setBulkResult({ recorded: data.recorded, allocatedCount: data.allocatedCount, creditBalance: data.creditBalance });
+        toast({ title: "Payment recorded", description: `Cleared ${data.allocatedCount} bill(s) FIFO. Advance left: ${fmt(data.creditBalance)}` });
         loadApprovals();
+        loadBalance();
       } else {
         toast({ title: "Payment failed", description: data.error, variant: "destructive" });
       }
     } finally {
-      setPaySubmitting(false);
+      setBulkSubmitting(false);
     }
-  }
-  async function removePayment(index: number) {
-    if (!paying) return;
-    const r = await fetch(`/api/expenses/${paying.id}/payments/${index}`, { method: "DELETE", credentials: "include" });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok) { setPaying(data); setPayAmt(String(netDue(data) || "")); loadApprovals(); }
-    else { toast({ title: "Could not remove payment", description: data.error, variant: "destructive" }); }
   }
 
   async function submitOwn() {
@@ -372,6 +378,28 @@ export default function OfficeCostingPage() {
               </div>
             </Card>
 
+            {/* Outstanding owed + advance, with the bulk (lump-sum) payment entry.
+                Payments are made in bulk and adjusted FIFO across approved bills. */}
+            <Card className="p-4 bg-slate-50 border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-8">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-amber-700/80 font-medium">Outstanding to pay</div>
+                    <div className="text-2xl font-bold text-amber-700">{fmt(balance.outstandingTotal)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">across all approved bills (all months)</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-green-700/80 font-medium">Advance / credit</div>
+                    <div className="text-2xl font-bold text-green-700">{fmt(balance.creditBalance)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">paid but not yet adjusted</div>
+                  </div>
+                </div>
+                <Button onClick={openBulk}>
+                  <IndianRupee size={16} className="mr-1" /> Record bulk payment
+                </Button>
+              </div>
+            </Card>
+
             <Card className="p-4 flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
                 <Label className="text-sm">Status:</Label>
@@ -462,13 +490,12 @@ export default function OfficeCostingPage() {
                               <span className="text-xs text-muted-foreground italic">awaiting {APPROVER_LABEL[e.approverId] || e.approverId}</span>
                             )}
                             {e.status === "approved" && !e.isOwnCost && (
-                              <Button size="sm" variant="outline" onClick={() => openPayments(e)} title="Record payment">
-                                <IndianRupee size={14} className="mr-1" />
-                                {paidSum(e) > 0 ? `${fmt(netDue(e))} due` : "Record payment"}
+                              <Button size="sm" variant="ghost" onClick={() => setViewing(e)} title="View payments">
+                                {paidSum(e) > 0 ? `${fmt(netDue(e))} due` : "Unpaid"}
                               </Button>
                             )}
                             {e.status === "paid" && !e.isOwnCost && (
-                              <Button size="sm" variant="ghost" onClick={() => openPayments(e)} title="View payments">Payments</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setViewing(e)} title="View payments">Payments</Button>
                             )}
                             {e.status === "approved" && e.isOwnCost && (
                               <span className="text-xs text-muted-foreground italic">settled</span>
@@ -730,35 +757,33 @@ export default function OfficeCostingPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Part-payment dialog: record manual payments against an approved bill */}
-        <Dialog open={!!paying} onOpenChange={(o) => !o && setPaying(null)}>
+        {/* Per-bill payments — read-only view of the FIFO-allocated payments */}
+        <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Record payment</DialogTitle>
+              <DialogTitle>Payments for this bill</DialogTitle>
               <DialogDescription>
-                {paying && <>{userName(paying.userId)} · {paying.category} · approved {fmt(paying.amount)}</>}
+                {viewing && <>{userName(viewing.userId)} · {viewing.category} · approved {fmt(viewing.amount)}</>}
               </DialogDescription>
             </DialogHeader>
 
-            {paying && (
+            {viewing && (
               <div className="space-y-4">
-                {/* Approved / paid / net summary */}
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-md bg-slate-50 p-2">
                     <div className="text-xs text-muted-foreground">Approved</div>
-                    <div className="font-semibold">{fmt(paying.amount)}</div>
+                    <div className="font-semibold">{fmt(viewing.amount)}</div>
                   </div>
                   <div className="rounded-md bg-green-50 p-2">
                     <div className="text-xs text-muted-foreground">Paid till date</div>
-                    <div className="font-semibold text-green-700">{fmt(paidSum(paying))}</div>
+                    <div className="font-semibold text-green-700">{fmt(paidSum(viewing))}</div>
                   </div>
                   <div className="rounded-md bg-amber-50 p-2">
                     <div className="text-xs text-muted-foreground">Net to be paid</div>
-                    <div className="font-semibold text-amber-700">{fmt(netDue(paying))}</div>
+                    <div className="font-semibold text-amber-700">{fmt(netDue(viewing))}</div>
                   </div>
                 </div>
 
-                {/* Recorded payment rows */}
                 <div className="rounded-md border overflow-hidden">
                   <Table>
                     <TableHeader>
@@ -766,57 +791,91 @@ export default function OfficeCostingPage() {
                         <TableHead>Date</TableHead>
                         <TableHead>Paid via</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
-                        <TableHead className="w-8"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paymentsOf(paying).length === 0 ? (
-                        <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-3 text-sm">No payments recorded yet.</TableCell></TableRow>
-                      ) : paymentsOf(paying).map((p, i) => (
+                      {paymentsOf(viewing).length === 0 ? (
+                        <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-3 text-sm">No payments adjusted yet. Use “Record bulk payment”.</TableCell></TableRow>
+                      ) : paymentsOf(viewing).map((p, i) => (
                         <TableRow key={i}>
                           <TableCell>{p.date}</TableCell>
                           <TableCell>{p.paidVia}</TableCell>
                           <TableCell className="text-right font-medium">{fmt(p.amount)}</TableCell>
-                          <TableCell>
-                            <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 h-7 w-7" onClick={() => removePayment(i)} title="Remove payment"><Trash2 size={14} /></Button>
-                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
-
-                {/* Add a new payment row */}
-                {netDue(paying) > 0 ? (
-                  <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Date</Label>
-                      <Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Paid via</Label>
-                      <Select value={payVia} onValueChange={setPayVia}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {PAYMENT_MODES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Amount (₹)</Label>
-                      <Input type="number" min="0" step="0.01" value={payAmt} onChange={e => setPayAmt(e.target.value)} />
-                    </div>
-                    <Button onClick={addPayment} disabled={paySubmitting}>{paySubmitting ? "Saving…" : "Add"}</Button>
-                  </div>
-                ) : (
-                  <div className="text-sm text-green-700 font-medium text-center">This bill is fully paid.</div>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  Payments are made in bulk and adjusted FIFO (oldest bill first) across all approved bills.
+                </p>
               </div>
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setPaying(null)}>Close</Button>
+              <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk (lump-sum) payment — allocated FIFO across outstanding approved bills */}
+        <Dialog open={bulkOpen} onOpenChange={(o) => !o && setBulkOpen(false)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Record bulk payment</DialogTitle>
+              <DialogDescription>
+                Adjusted FIFO (oldest approved bill first) across all associates. Any leftover is kept as an advance.
+              </DialogDescription>
+            </DialogHeader>
+
+            {bulkResult ? (
+              <div className="space-y-4">
+                <div className="rounded-md bg-green-50 p-4 text-center space-y-1">
+                  <div className="text-sm text-muted-foreground">Recorded {fmt(bulkResult.recorded)}</div>
+                  <div className="font-medium">Cleared / part-paid {bulkResult.allocatedCount} bill{bulkResult.allocatedCount === 1 ? "" : "s"} (FIFO)</div>
+                  <div className="text-sm">Advance / credit carried: <span className="font-semibold text-green-700">{fmt(bulkResult.creditBalance)}</span></div>
+                </div>
+                <DialogFooter>
+                  <Button onClick={() => setBulkOpen(false)}>Done</Button>
+                </DialogFooter>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-center">
+                  <div className="rounded-md bg-amber-50 p-2">
+                    <div className="text-xs text-muted-foreground">Outstanding</div>
+                    <div className="font-semibold text-amber-700">{fmt(balance.outstandingTotal)}</div>
+                  </div>
+                  <div className="rounded-md bg-green-50 p-2">
+                    <div className="text-xs text-muted-foreground">Current advance</div>
+                    <div className="font-semibold text-green-700">{fmt(balance.creditBalance)}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Payment date</Label>
+                    <Input type="date" value={bulkDate} onChange={e => setBulkDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Paid via</Label>
+                    <Select value={bulkVia} onValueChange={setBulkVia}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_MODES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Amount paid (₹)</Label>
+                  <Input type="number" min="0" step="0.01" value={bulkAmt} onChange={e => setBulkAmt(e.target.value)} placeholder="Total lump sum paid this week" autoFocus />
+                </div>
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
+                  <Button onClick={recordBulk} disabled={bulkSubmitting}>{bulkSubmitting ? "Adjusting…" : "Record & adjust FIFO"}</Button>
+                </DialogFooter>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>

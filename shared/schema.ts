@@ -371,6 +371,21 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({
   payments: true,
 });
 
+// Bulk (lump-sum) disbursements made by the approver. Each one is the "money in".
+// It is allocated FIFO (oldest approved bill first, globally across all associates)
+// into per-bill `payments` rows; any leftover stays as an advance/credit balance
+// (credit = SUM(bulk_payments.amount) − SUM(all allocated bill payments)) and is
+// auto-applied to bills as they get approved.
+export const bulkPayments = pgTable("bulk_payments", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  date: text("date").notNull(),
+  paidVia: text("paid_via").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  createdBy: varchar("created_by", { length: 10 }).notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type BulkPayment = typeof bulkPayments.$inferSelect;
+
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 export type Expense = typeof expenses.$inferSelect;
 

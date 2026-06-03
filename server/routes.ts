@@ -4353,6 +4353,15 @@ showpage
         return res.status(403).json({ error: `Only the designated approver (${exp.approverId === 'ADMIN' ? 'Admin' : 'Vijay Togaru'}) can approve this bill.` });
       }
       const updated = await storage.updateExpenseStatus(id, 'approved');
+      // Auto-apply any advance/credit balance to this newly approved bill (FIFO).
+      if (!exp.isOwnCost) {
+        const credit = await computeCreditBalance();
+        if (credit > 0.004) {
+          await allocateFIFO(credit, new Date().toISOString().slice(0, 10), 'Advance adjustment');
+          const refreshed = await storage.getExpenseById(id);
+          return res.json(refreshed ?? updated);
+        }
+      }
       return res.json(updated);
     } catch (error: any) {
       console.error("Approve expense error:", error);
@@ -4401,42 +4410,95 @@ showpage
     }
   });
 
-  // POST /api/expenses/:id/payments — approver records a part-payment against an
-  // approved bill. Payments are manual (no gateway), so each row carries date,
-  // mode and amount. The bill flips to 'paid' automatically once the net is cleared.
-  app.post("/api/expenses/:id/payments", async (req, res) => {
-    try {
-      if (!requireApprover(req, res)) return;
-      const id = parseInt(req.params.id, 10);
-      const exp = await storage.getExpenseById(id);
-      if (!exp) return res.status(404).json({ error: "Expense not found" });
-      if (exp.isOwnCost) return res.status(400).json({ error: "Own office costs are settled at approval and do not take part-payments" });
-      if (exp.status !== 'approved' && exp.status !== 'paid') {
-        return res.status(400).json({ error: `Only approved bills can be paid (this one is '${exp.status}')` });
-      }
+  // ---- Bulk (lump-sum) payment + FIFO allocation helpers ----
+  // (function declarations are hoisted, so the approve handler above can call them)
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const paidOf = (e: any) => (e.payments ?? []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
 
+  // Outstanding approved reimbursement bills (not own cost, net due > 0), oldest first.
+  async function getOutstandingBillsFIFO(): Promise<Array<{ exp: any; due: number }>> {
+    const all = await storage.getExpenses({});
+    return all
+      .filter((e: any) => e.status === 'approved' && !e.isOwnCost)
+      .map((e: any) => ({ exp: e, due: round2((parseFloat(String(e.amount)) || 0) - paidOf(e)) }))
+      .filter((x) => x.due > 0)
+      .sort((a, b) => (a.exp.date || '').localeCompare(b.exp.date || '') || a.exp.id - b.exp.id);
+  }
+
+  // Advance/credit = money paid in (bulk) that has not yet been allocated to bills.
+  async function computeCreditBalance(): Promise<number> {
+    const [bulk, all] = await Promise.all([storage.getBulkPayments(), storage.getExpenses({})]);
+    const totalIn = bulk.reduce((s, b) => s + (parseFloat(String(b.amount)) || 0), 0);
+    const totalAllocated = all.reduce((s: number, e: any) => s + paidOf(e), 0);
+    return round2(totalIn - totalAllocated);
+  }
+
+  async function getOutstandingTotal(): Promise<number> {
+    const bills = await getOutstandingBillsFIFO();
+    return round2(bills.reduce((s, x) => s + x.due, 0));
+  }
+
+  // Allocate `amount` FIFO across outstanding bills, writing per-bill payment rows.
+  async function allocateFIFO(amount: number, date: string, paidVia: string) {
+    let remaining = round2(amount);
+    const allocations: Array<{ expenseId: number; userId: string; billDate: string; amount: number }> = [];
+    const bills = await getOutstandingBillsFIFO();
+    for (const { exp, due } of bills) {
+      if (remaining <= 0.004) break;
+      const take = round2(Math.min(remaining, due));
+      if (take <= 0) continue;
+      await storage.addExpensePayment(exp.id, { date, paidVia, amount: take });
+      allocations.push({ expenseId: exp.id, userId: exp.userId, billDate: exp.date, amount: take });
+      remaining = round2(remaining - take);
+    }
+    return { allocations, leftover: round2(remaining) };
+  }
+
+  // POST /api/expenses/bulk-payment — approver records a lump-sum disbursement.
+  // It is allocated FIFO (oldest approved bill first, across all associates); any
+  // leftover stays as an advance/credit that auto-applies to bills as they approve.
+  app.post("/api/expenses/bulk-payment", async (req, res) => {
+    try {
+      const callerId = requireAuth(req, res); if (!callerId) return;
+      if (!requireApprover(req, res)) return;
       const { date, paidVia, amount } = req.body ?? {};
       const amt = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
       if (!date || typeof date !== 'string') return res.status(400).json({ error: "Payment date is required" });
       if (!paidVia || typeof paidVia !== 'string') return res.status(400).json({ error: "Paid via is required" });
-      if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
+      if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
 
-      const billTotal = parseFloat(String(exp.amount)) || 0;
-      const alreadyPaid = (exp.payments ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-      // Guard against over-paying beyond the approved amount (small float tolerance).
-      if (Math.round((alreadyPaid + amt) * 100) > Math.round(billTotal * 100) + 1) {
-        const remaining = Math.max(0, billTotal - alreadyPaid);
-        return res.status(400).json({ error: `Payment exceeds the net due of ₹${remaining.toFixed(2)}` });
-      }
-
-      const updated = await storage.addExpensePayment(id, {
-        date,
-        paidVia: paidVia.trim(),
-        amount: Math.round(amt * 100) / 100,
+      await storage.createBulkPayment({ date, paidVia: paidVia.trim(), amount: round2(amt), createdBy: callerId });
+      // Allocate everything available (this payment + any prior credit) FIFO.
+      const available = Math.max(0, await computeCreditBalance());
+      const { allocations, leftover } = await allocateFIFO(available, date, paidVia.trim());
+      const outstandingTotal = await getOutstandingTotal();
+      return res.json({
+        recorded: round2(amt),
+        allocatedCount: allocations.length,
+        allocations,
+        creditBalance: leftover,
+        outstandingTotal,
       });
-      return res.json(updated);
     } catch (error: any) {
-      console.error("Add expense payment error:", error);
+      console.error("Bulk payment error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/expenses/balance — outstanding total, advance/credit, recent disbursements.
+  app.get("/api/expenses/balance", async (req, res) => {
+    try {
+      if (!requireApprover(req, res)) return;
+      const [creditBalance, outstandingTotal, bulk] = await Promise.all([
+        computeCreditBalance(), getOutstandingTotal(), storage.getBulkPayments(),
+      ]);
+      return res.json({
+        creditBalance: Math.max(0, creditBalance),
+        outstandingTotal,
+        bulkPayments: bulk.slice(0, 30),
+      });
+    } catch (error: any) {
+      console.error("Expense balance error:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

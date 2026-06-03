@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bankStatements, bankTransactions } from "@shared/schema";
+import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BulkPayment, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bulkPayments, bankStatements, bankTransactions } from "@shared/schema";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -104,6 +104,8 @@ function loadDevState() {
     if (Array.isArray(s.expenses)) { inMemoryExpenses.length = 0; inMemoryExpenses.push(...reviveCreatedAt<Expense>(s.expenses)); }
     if (Array.isArray(s.bankStatements)) { inMemoryBankStatements.length = 0; inMemoryBankStatements.push(...reviveCreatedAt<BankStatement>(s.bankStatements)); }
     if (Array.isArray(s.bankTransactions)) { inMemoryBankTransactions.length = 0; inMemoryBankTransactions.push(...s.bankTransactions); }
+    if (Array.isArray(s.bulkPayments)) { inMemoryBulkPayments.length = 0; inMemoryBulkPayments.push(...reviveCreatedAt<BulkPayment>(s.bulkPayments)); }
+    if (typeof s.bulkPaymentSeq === 'number') memSeq.bulkPayment = s.bulkPaymentSeq;
     if (typeof s.expenseSeq === 'number') memSeq.expense = s.expenseSeq;
     if (typeof s.bankStmtSeq === 'number') memSeq.bankStmt = s.bankStmtSeq;
     if (typeof s.bankTxnSeq === 'number') memSeq.bankTxn = s.bankTxnSeq;
@@ -124,7 +126,9 @@ function saveDevStateNow() {
       expenses: inMemoryExpenses,
       bankStatements: inMemoryBankStatements,
       bankTransactions: inMemoryBankTransactions,
+      bulkPayments: inMemoryBulkPayments,
       expenseSeq: memSeq.expense,
+      bulkPaymentSeq: memSeq.bulkPayment,
       bankStmtSeq: memSeq.bankStmt,
       bankTxnSeq: memSeq.bankTxn,
     };
@@ -211,6 +215,9 @@ export interface IStorage {
   addExpensePayment(id: number, payment: ExpensePayment): Promise<Expense | undefined>;
   removeExpensePayment(id: number, index: number): Promise<Expense | undefined>;
   deleteExpense(id: number): Promise<boolean>;
+  // Bulk (lump-sum) payments — the "money in" ledger for FIFO allocation
+  createBulkPayment(input: { date: string; paidVia: string; amount: number; createdBy: string }): Promise<BulkPayment>;
+  getBulkPayments(): Promise<BulkPayment[]>;
   // Bank statements (Receipts & Payments)
   createBankStatement(input: {
     bankName: string;
@@ -259,7 +266,8 @@ const inMemoryMisEntries: MisEntry[] = [];
 const inMemoryExpenses: Expense[] = [];
 const inMemoryBankStatements: BankStatement[] = [];
 const inMemoryBankTransactions: BankTransaction[] = [];
-const memSeq = { expense: 1, bankStmt: 1, bankTxn: 1 };
+const inMemoryBulkPayments: BulkPayment[] = [];
+const memSeq = { expense: 1, bulkPayment: 1, bankStmt: 1, bankTxn: 1 };
 loadDevState();
 
 export class PostgresStorage implements IStorage {
@@ -896,6 +904,37 @@ export class PostgresStorage implements IStorage {
       .where(eq(expenses.id, id))
       .returning();
     return result[0];
+  }
+
+  async createBulkPayment(input: { date: string; paidVia: string; amount: number; createdBy: string }): Promise<BulkPayment> {
+    const now = new Date();
+    if (!this.hasDatabase) {
+      const bp: BulkPayment = {
+        id: memSeq.bulkPayment++,
+        date: input.date,
+        paidVia: input.paidVia,
+        amount: String(input.amount),
+        createdBy: input.createdBy,
+        createdAt: now,
+      };
+      inMemoryBulkPayments.push(bp);
+      persist();
+      return bp;
+    }
+    const result = await this.db.insert(bulkPayments).values({
+      date: input.date,
+      paidVia: input.paidVia,
+      amount: String(input.amount),
+      createdBy: input.createdBy,
+    }).returning();
+    return result[0];
+  }
+
+  async getBulkPayments(): Promise<BulkPayment[]> {
+    if (!this.hasDatabase) {
+      return [...inMemoryBulkPayments].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id);
+    }
+    return await this.db.select().from(bulkPayments).orderBy(sql`${bulkPayments.date} DESC, ${bulkPayments.id} DESC`) as BulkPayment[];
   }
 
   async deleteExpense(id: number): Promise<boolean> {
