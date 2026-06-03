@@ -42,6 +42,76 @@ export default function LoginPage() {
   const [adminLoading, setAdminLoading] = useState(false);
   const privUser = privUsername ? quickLoginUsers.find(u => u.username === privUsername) : null;
 
+  // Forgot-password reset (gated by a security question, admin & vijay only)
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetUsername, setResetUsername] = useState("admin");
+  const [resetAnswer, setResetAnswer] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [resetSuccess, setResetSuccess] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const closeReset = () => {
+    setResetOpen(false);
+    setResetUsername("admin");
+    setResetAnswer("");
+    setResetNewPassword("");
+    setResetConfirm("");
+    setResetError("");
+    setResetSuccess("");
+    setResetLoading(false);
+  };
+
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError("");
+    setResetSuccess("");
+
+    if (!resetAnswer.trim()) {
+      setResetError("Please answer the security question.");
+      return;
+    }
+    if (resetNewPassword.length < 8) {
+      setResetError("New password must be at least 8 characters.");
+      return;
+    }
+    if (resetNewPassword !== resetConfirm) {
+      setResetError("Passwords do not match.");
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const response = await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: resetUsername,
+          securityAnswer: resetAnswer,
+          newPassword: resetNewPassword,
+        }),
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        setResetSuccess(
+          `Password for ${resetUsername} has been reset. You can now sign in with your new password.`
+        );
+        setResetAnswer("");
+        setResetNewPassword("");
+        setResetConfirm("");
+      } else {
+        const data = await response.json().catch(() => ({}));
+        setResetError(data?.error || "Password reset failed. Please try again.");
+      }
+    } catch (err) {
+      setResetError("Network error. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -207,10 +277,18 @@ export default function LoginPage() {
                 <p className="text-xs text-slate-500">Associates: "password123". Admin default: "password@123" (must be changed on first login).</p>
               </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex-col gap-3">
               <Button type="submit" className="w-full" disabled={loading} data-testid="button-signin">
                 {loading ? "Signing in..." : "Sign In"}
               </Button>
+              <button
+                type="button"
+                className="text-sm text-blue-600 hover:underline"
+                onClick={() => setResetOpen(true)}
+                data-testid="link-forgot-password"
+              >
+                Forgot password?
+              </button>
             </CardFooter>
           </form>
         </Card>
@@ -264,6 +342,96 @@ export default function LoginPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Forgot-password reset — gated by a security question, admin & vijay only */}
+      <Dialog open={resetOpen} onOpenChange={(open) => { if (!open) closeReset(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mx-auto h-10 w-10 rounded-lg bg-amber-500 flex items-center justify-center mb-2">
+              <Lock className="h-5 w-5 text-white" />
+            </div>
+            <DialogTitle className="text-center">Reset password</DialogTitle>
+            <DialogDescription className="text-center">
+              Available for the <strong>admin</strong> and <strong>vijay</strong> accounts. Answer the
+              security question to set a new password.
+            </DialogDescription>
+          </DialogHeader>
+          {resetSuccess ? (
+            <div className="space-y-4">
+              <Alert>
+                <AlertDescription>{resetSuccess}</AlertDescription>
+              </Alert>
+              <DialogFooter>
+                <Button type="button" onClick={closeReset} className="w-full" data-testid="button-reset-done">
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <form onSubmit={handleResetSubmit} className="space-y-4">
+              {resetError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{resetError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="reset-account">Account</Label>
+                <select
+                  id="reset-account"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={resetUsername}
+                  onChange={(e) => setResetUsername(e.target.value)}
+                  data-testid="select-reset-account"
+                >
+                  <option value="admin">Admin</option>
+                  <option value="vijay">Vijay Togaru</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-answer">Where were you born?</Label>
+                <Input
+                  id="reset-answer"
+                  value={resetAnswer}
+                  onChange={(e) => setResetAnswer(e.target.value)}
+                  placeholder="Security answer"
+                  autoFocus
+                  data-testid="input-reset-answer"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-new-password">New password</Label>
+                <Input
+                  id="reset-new-password"
+                  type="password"
+                  value={resetNewPassword}
+                  onChange={(e) => setResetNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  data-testid="input-reset-new-password"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-confirm-password">Confirm new password</Label>
+                <Input
+                  id="reset-confirm-password"
+                  type="password"
+                  value={resetConfirm}
+                  onChange={(e) => setResetConfirm(e.target.value)}
+                  placeholder="Re-enter new password"
+                  data-testid="input-reset-confirm-password"
+                />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={closeReset} disabled={resetLoading}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={resetLoading} data-testid="button-reset-submit">
+                  {resetLoading ? "Resetting..." : "Reset password"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

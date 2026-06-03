@@ -1178,6 +1178,54 @@ export async function registerRoutes(
     }
   });
 
+  // Forgot-password reset gated by a security question ("Where were you born?").
+  // Only the privileged accounts (admin and vijay/PROP) are eligible, and only
+  // when the answer is "Tuni" (case-insensitive). No active session is required
+  // because the whole point is to recover access when locked out.
+  const RESET_SECURITY_ANSWER = 'tuni';
+  const RESET_ELIGIBLE_USERNAMES = new Set(['admin', 'vijay']);
+
+  app.post("/api/forgot-password", async (req, res) => {
+    try {
+      const { username, securityAnswer, newPassword } = req.body ?? {};
+
+      const normalizedUsername = (username ?? '').toString().toLowerCase().trim();
+      if (!RESET_ELIGIBLE_USERNAMES.has(normalizedUsername)) {
+        return res.status(403).json({ error: "Password reset is only available for the admin and vijay accounts." });
+      }
+
+      const normalizedAnswer = (securityAnswer ?? '').toString().toLowerCase().trim();
+      if (normalizedAnswer !== RESET_SECURITY_ANSWER) {
+        return res.status(401).json({ error: "Incorrect answer to the security question." });
+      }
+
+      if (typeof newPassword !== "string" || newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+
+      // Don't allow resetting straight back to the well-known default password.
+      if (newPassword === DEFAULT_ADMIN_PASSWORD) {
+        return res.status(400).json({ error: "New password must be different from the default password" });
+      }
+
+      const user = await storage.getUserByUsername(normalizedUsername);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const updated = await storage.updateUserPassword(user.id, newPassword);
+      if (!updated) {
+        return res.status(500).json({ error: "Failed to reset password" });
+      }
+
+      console.log(`[Forgot Password] Password reset via security question for ${normalizedUsername} (${user.id})`);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/reports", async (req, res) => {
     try {
       const validationResult = insertReportSchema.safeParse(req.body);
