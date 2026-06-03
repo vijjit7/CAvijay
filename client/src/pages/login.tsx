@@ -327,6 +327,21 @@ export default function LoginPage() {
                 autoFocus
                 data-testid="input-admin-password"
               />
+              <button
+                type="button"
+                className="text-sm text-blue-600 hover:underline"
+                onClick={() => {
+                  const account = privUsername ?? "admin";
+                  setPrivUsername(null);
+                  setAdminPassword("");
+                  setAdminError("");
+                  setResetUsername(account);
+                  setResetOpen(true);
+                }}
+                data-testid="link-forgot-password-priv"
+              >
+                Forgot password?
+              </button>
             </div>
             <DialogFooter className="gap-2">
               <Button
