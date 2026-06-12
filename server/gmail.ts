@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { isGmailOAuthConfigured, getGmailReadClient } from './gmail-oauth';
 
 export interface TriggerEmailInfo {
   triggerDate: Date;
@@ -57,6 +58,13 @@ async function getAccessToken() {
 }
 
 async function getGmailClient() {
+  // Prefer standard Google OAuth credentials (GMAIL_CLIENT_ID/SECRET/TOKEN) — these
+  // work on any host (Railway/local). Fall back to the Replit connector when the
+  // app runs on Replit and OAuth env vars are not set.
+  if (isGmailOAuthConfigured()) {
+    return getGmailReadClient();
+  }
+
   const accessToken = await getAccessToken();
 
   const oauth2Client = new google.auth.OAuth2();
@@ -185,6 +193,7 @@ export interface WorkAllocationEntry {
   mobileNumber: string | null;
   address: string | null;
   initiatedPerson: string | null;
+  workNature?: string | null;
 }
 
 export interface EmailImportResult {
@@ -288,8 +297,115 @@ function parseWorkAllocationTable(htmlContent: string): WorkAllocationEntry[] {
       }
     }
   }
-  
+
   return entries;
+}
+
+// Strip HTML/entities and collapse whitespace to plain text.
+function cleanText(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Parse the Piramal "New PD Assigned" notification format, where the work details
+// are labeled and pipe-delimited in the subject (and/or body), e.g.:
+//   New PD Assigned for Customer: P SAI KUMAR | Lead : HLSA001371C8 |
+//   Branch Name : Hyderabad - Nagole | Product : Home Loan | Mobile : 9xxxx | ...
+// Returns a single entry, or null when no Lead ID + Customer can be found.
+function parsePdAssignedEntry(text: string): WorkAllocationEntry | null {
+  const cleaned = cleanText(text);
+
+  // Break into "Label : Value" segments on pipes (and newlines as a secondary split).
+  const segments = cleaned
+    .split(/\s*\|\s*/)
+    .flatMap((s) => s.split(/\n+/))
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const fields: Record<string, string> = {};
+  for (const seg of segments) {
+    const m = seg.match(/^([^:]+):\s*(.+)$/);
+    if (!m) continue;
+    const label = m[1].toLowerCase().trim();
+    const value = m[2].trim();
+    if (value) fields[label] = value;
+  }
+
+  // Find the first field whose label contains any of the given keywords.
+  const find = (...keys: string[]): string | null => {
+    for (const k of keys) {
+      const hit = Object.keys(fields).find((label) => label.includes(k));
+      if (hit) return fields[hit];
+    }
+    return null;
+  };
+
+  const customerName = find("customer", "applicant", "name of");
+  const leadId = find("lead");
+  if (!leadId || !customerName) return null;
+
+  return {
+    product: find("product"),
+    businessName: find("business"),
+    entityType: find("entity"),
+    customerName,
+    leadId,
+    branch: find("branch"),
+    initiationDate: find("initiation date", "initiated date"),
+    mobileNumber: find("mobile", "contact", "phone"),
+    address: find("address"),
+    initiatedPerson: find("initiated by", "rm name", "pd person", "officer"),
+  };
+}
+
+// Merge the subject-derived entry (authoritative core fields) with the matching
+// body-table row (richer fields: business name, entity type, initiation date,
+// mobile, address). The subject wins for customer/lead/branch/product; the table
+// fills the rest. Matched by Lead ID upstream so a mis-aligned table can never
+// corrupt the core fields.
+function mergeEntry(subject: WorkAllocationEntry, table?: WorkAllocationEntry): WorkAllocationEntry {
+  if (!table) return subject;
+  const pick = (a: string | null | undefined, b: string | null | undefined) =>
+    (a && a.trim() ? a : (b || null));
+  return {
+    customerName: subject.customerName || table.customerName,
+    leadId: subject.leadId,
+    branch: pick(subject.branch, table.branch),
+    product: pick(subject.product, table.product),
+    businessName: pick(table.businessName, subject.businessName),
+    entityType: pick(table.entityType, subject.entityType),
+    initiationDate: pick(table.initiationDate, subject.initiationDate),
+    mobileNumber: pick(table.mobileNumber, subject.mobileNumber),
+    address: pick(table.address, subject.address),
+    initiatedPerson: subject.initiatedPerson || table.initiatedPerson,
+  };
+}
+
+// Work nature from body text like 'A new "LIP" has been assigned' → "LIP".
+function extractWorkNature(text: string): string | null {
+  const m = cleanText(text).match(/[Aa]\s*new\s+["']?([A-Z]{2,4})["']?\s/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+// The person the work was assigned to: the "To" recipient that isn't the connected
+// account ("me"). Returns the address local-part (e.g. "barigela.jagadeeshbabu"),
+// mirroring the manual-paste behaviour.
+function extractInitiatedPerson(toHeader: string, ownerEmail: string | null): string | null {
+  if (!toHeader) return null;
+  const parts = toHeader.split(',').map(s => s.trim()).filter(Boolean);
+  for (const p of parts) {
+    const emailMatch = p.match(/<([^>]+)>/);
+    const email = (emailMatch ? emailMatch[1] : p).trim().toLowerCase();
+    if (!email.includes('@')) continue;
+    if (ownerEmail && email === ownerEmail.toLowerCase()) continue; // skip "me"
+    const local = email.split('@')[0];
+    if (local) return local;
+  }
+  return null;
 }
 
 function extractBodyFromParts(parts: any[], preferHtml: boolean = true): string {
@@ -324,21 +440,30 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
   try {
     console.log(`Importing work allocation emails from last ${daysBack} days`);
     const gmail = await getGmailClient();
-    
+
+    // The connected account address — used to identify "me" in the To header so the
+    // other recipient becomes the initiatedPerson.
+    let ownerEmail: string | null = null;
+    try {
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      ownerEmail = profile.data.emailAddress || null;
+    } catch { /* non-fatal */ }
+
     // Calculate date filter
     const afterDate = new Date();
     afterDate.setDate(afterDate.getDate() - daysBack);
     const afterDateStr = afterDate.toISOString().split('T')[0].replace(/-/g, '/');
     
-    // Search for Piramal work allocation emails
-    // Common patterns: subject contains "allocation" or "assigned" or from piramal domain
-    const query = `after:${afterDateStr} (subject:allocation OR subject:assigned OR subject:"work order" OR from:piramal)`;
+    // Only the "New PD Assigned" emails represent genuinely new work AND carry the
+    // canonical table column order. The status-update variants ("PD Submitted",
+    // "PD sent back for review") reorder/insert columns and must be ignored.
+    const query = `after:${afterDateStr} subject:"New PD Assigned"`;
     console.log(`Gmail search query: ${query}`);
     
     const response = await gmail.users.messages.list({
       userId: 'me',
       q: query,
-      maxResults: 50
+      maxResults: 200
     });
 
     const messages = response.data.messages;
@@ -378,39 +503,74 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
           senderName = fromHeader.split('@')[0].replace(/[._-]/g, ' ');
         }
 
-        // Extract body content - handle nested multipart messages
+        // Extract subject + body content (handle nested multipart messages)
+        const subjectHeader = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
+
+        // Only the original "New PD Assigned" notification is genuine new work and has
+        // the canonical table layout. Skip replies/forwards and status-update variants
+        // ("PD Submitted", "PD sent back for review").
+        if (!subjectHeader.trim().toLowerCase().startsWith('new pd assigned')) {
+          continue;
+        }
+
         let bodyContent = '';
         const payload = msgDetails.data.payload;
-        
+
         if (payload?.body?.data) {
           bodyContent = Buffer.from(payload.body.data, 'base64').toString('utf-8');
         } else if (payload?.parts) {
           bodyContent = extractBodyFromParts(payload.parts, true);
         }
 
-        if (bodyContent) {
-          const entries = parseWorkAllocationTable(bodyContent);
-          if (entries.length > 0) {
-            // Populate initiatedPerson from email sender
-            entries.forEach(entry => {
-              entry.initiatedPerson = senderName;
-            });
-            console.log(`Parsed ${entries.length} entries from email ${message.id} (from: ${senderName})`);
-            allEntries.push(...entries);
-          }
+        // The subject carries the authoritative core fields (Customer / Lead / Branch /
+        // Product), reliable across every variant ("New PD Assigned", "PD Submitted",
+        // "PD sent back for review", "Re:"). The body table carries the rich fields
+        // (Business Name, Entity Type, Initiation Date, Mobile, Address). Parse both,
+        // then merge the table row whose Lead ID matches the subject — so a mis-aligned
+        // table can never corrupt the core fields. Fall back to the raw table for
+        // legacy bulk-allocation emails whose subject has no labeled fields.
+        const subjectEntry = parsePdAssignedEntry(subjectHeader);
+        const tableRows = bodyContent ? parseWorkAllocationTable(bodyContent) : [];
+
+        let entries: WorkAllocationEntry[] = [];
+        if (subjectEntry) {
+          const match = tableRows.find(r => r.leadId === subjectEntry.leadId);
+          entries = [mergeEntry(subjectEntry, match)];
+        } else {
+          entries = tableRows;
+        }
+
+        if (entries.length > 0) {
+          // workNature from the body ("A new LIP …"); initiatedPerson from the "To"
+          // recipient that isn't the connected account, falling back to the sender.
+          const toHeader = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
+          const workNature = extractWorkNature(bodyContent);
+          const assignedTo = extractInitiatedPerson(toHeader, ownerEmail);
+          entries.forEach(entry => {
+            if (workNature && !entry.workNature) entry.workNature = workNature;
+            if (!entry.initiatedPerson) entry.initiatedPerson = assignedTo || senderName;
+          });
+          console.log(`Parsed ${entries.length} entries from email ${message.id} (subject: "${subjectHeader.slice(0, 60)}", assignedTo: ${assignedTo})`);
+          allEntries.push(...entries);
         }
       } catch (msgErr: any) {
         console.error(`Error processing email ${message.id}:`, msgErr.message);
       }
     }
 
-    // Deduplicate by Lead ID
-    const uniqueEntries = allEntries.reduce((acc, entry) => {
-      if (!acc.find(e => e.leadId === entry.leadId)) {
-        acc.push(entry);
+    // Deduplicate by Lead ID, keeping the richest entry (most fields filled) — so the
+    // full-table "New PD Assigned" email wins over sparser status-update duplicates
+    // ("PD Submitted", "PD sent back for review") for the same lead.
+    const filledCount = (e: WorkAllocationEntry) =>
+      Object.values(e).filter(v => v != null && String(v).trim() !== '').length;
+    const byLead = new Map<string, WorkAllocationEntry>();
+    for (const entry of allEntries) {
+      const existing = byLead.get(entry.leadId);
+      if (!existing || filledCount(entry) > filledCount(existing)) {
+        byLead.set(entry.leadId, entry);
       }
-      return acc;
-    }, [] as WorkAllocationEntry[]);
+    }
+    const uniqueEntries = Array.from(byLead.values());
 
     console.log(`Total unique entries extracted: ${uniqueEntries.length}`);
 

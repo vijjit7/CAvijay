@@ -1,3 +1,6 @@
+// Load .env first so process.env is populated before any module reads it (db, gmail).
+// Real host env vars (e.g. Railway) still win — dotenv only fills what's unset.
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -177,4 +180,13 @@ app.use((req, res, next) => {
   }
 
   log(`Application fully initialized`);
+
+  // Start the periodic Gmail → MIS auto-import (no-op if Gmail isn't configured
+  // or MIS_AUTO_IMPORT_ENABLED=false). Non-fatal.
+  try {
+    const { startMisAutoImport } = await import("./mis-auto-import");
+    startMisAutoImport();
+  } catch (err) {
+    console.error('[SERVER] Failed to start MIS auto-import (non-fatal):', err);
+  }
 })();

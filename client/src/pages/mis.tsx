@@ -75,6 +75,15 @@ type Associate = {
   isAdmin: boolean;
 };
 
+// A row needs manual completion when most of its key detail fields (business name,
+// contact, address, initiation date) are missing — e.g. an auto-import where the
+// source email lacked a full details table. Such rows are highlighted light yellow.
+function isIncompleteEntry(entry: MisEntry): boolean {
+  const keyFields = [entry.businessName, entry.contactDetails, entry.customerAddress, entry.inDate];
+  const missing = keyFields.filter((v) => !v || !String(v).trim()).length;
+  return missing >= 2;
+}
+
 export default function MisPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -263,6 +272,33 @@ export default function MisPage() {
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const importGmailMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/mis/import-gmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to import from Gmail (${res.status})`);
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/mis"] });
+      const added = data.added || 0;
+      const skipped = data.skipped || 0;
+      toast({
+        title: added > 0 ? "New work imported" : "No new work",
+        description: `${added} new entr${added === 1 ? "y" : "ies"} added${skipped > 0 ? `, ${skipped} already in MIS` : ""} (from ${data.emailCount || 0} emails).`,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Gmail import failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -673,6 +709,16 @@ export default function MisPage() {
             <p className="text-slate-500">Track your assigned work from email allocations</p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => importGmailMutation.mutate()}
+              disabled={importGmailMutation.isPending}
+              data-testid="button-import-gmail"
+            >
+              <Inbox className="h-4 w-4" />
+              {importGmailMutation.isPending ? "Importing..." : "Import from Gmail"}
+            </Button>
             <Dialog open={pasteDialogOpen} onOpenChange={setPasteDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2" data-testid="button-paste-data">
@@ -879,7 +925,7 @@ export default function MisPage() {
                   </TableHeader>
                   <TableBody>
                     {intrayEntries.map((entry) => (
-                      <TableRow key={entry.id} className="bg-white" data-testid={`row-intray-${entry.id}`}>
+                      <TableRow key={entry.id} className={isIncompleteEntry(entry) ? "bg-yellow-100" : "bg-white"} data-testid={`row-intray-${entry.id}`}>
                         <TableCell className="font-mono font-medium text-xs px-2">{entry.leadId}</TableCell>
                         <TableCell className="text-xs px-2">{entry.customerName}</TableCell>
                         <TableCell className="text-xs px-2">{entry.businessName || "-"}</TableCell>
@@ -1216,7 +1262,7 @@ export default function MisPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredMisEntries.map((entry) => (
-                      <TableRow key={entry.id} data-testid={`row-mis-${entry.id}`}>
+                      <TableRow key={entry.id} className={isIncompleteEntry(entry) ? "bg-yellow-100" : undefined} data-testid={`row-mis-${entry.id}`}>
                         <TableCell className="font-mono text-xs px-2">{entrySnoMap.get(entry.id) || entry.sno}</TableCell>
                         <TableCell className="font-mono font-medium text-xs px-2">{entry.leadId}</TableCell>
                         <TableCell className="text-xs px-2">{entry.customerName}</TableCell>

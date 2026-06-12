@@ -263,6 +263,37 @@ export interface IStorage {
 // In-memory storage for local development (when DATABASE_URL is not set)
 const inMemoryReports: Report[] = [];
 const inMemoryMisEntries: MisEntry[] = [];
+
+// Build a complete in-memory MIS row from an insert payload, matching the real
+// `misEntries` schema columns exactly (location / contactDetails / customerAddress
+// / inDate / initiatedPerson / workNature ...). Keeps no-DB dev mode in sync with
+// production so imported fields actually display.
+function toMemMisEntry(entry: InsertMisEntry, id: number): MisEntry {
+  return {
+    id,
+    sno: entry.sno ?? id,
+    associateId: entry.associateId,
+    leadId: entry.leadId,
+    customerName: entry.customerName,
+    businessName: entry.businessName ?? null,
+    contactDetails: entry.contactDetails ?? null,
+    customerAddress: entry.customerAddress ?? null,
+    inDate: entry.inDate ?? null,
+    outDate: entry.outDate ?? null,
+    initiatedPerson: entry.initiatedPerson ?? null,
+    product: entry.product ?? null,
+    pdPerson: entry.pdPerson ?? null,
+    pdTyping: entry.pdTyping ?? null,
+    pdPersonId: entry.pdPersonId ?? null,
+    pdTypingId: entry.pdTypingId ?? null,
+    workNature: entry.workNature ?? null,
+    location: entry.location ?? null,
+    status: entry.status ?? 'Pending',
+    workflowStatus: entry.workflowStatus ?? 'unassigned',
+    assignedAt: entry.assignedAt ?? null,
+    createdAt: new Date(),
+  };
+}
 const inMemoryExpenses: Expense[] = [];
 const inMemoryBankStatements: BankStatement[] = [];
 const inMemoryBankTransactions: BankTransaction[] = [];
@@ -568,23 +599,7 @@ export class PostgresStorage implements IStorage {
   async createMisEntry(entry: InsertMisEntry): Promise<MisEntry> {
     // Fallback for local development
     if (!this.hasDatabase) {
-      const nextId = inMemoryMisEntries.length + 1;
-      const misEntry: MisEntry = {
-        id: nextId,
-        sno: entry.sno || nextId,
-        leadId: entry.leadId,
-        customerName: entry.customerName,
-        product: entry.product || null,
-        businessName: entry.businessName || null,
-        entityType: entry.entityType || null,
-        branch: entry.branch || null,
-        initiationDate: entry.initiationDate || null,
-        mobileNumber: entry.mobileNumber || null,
-        address: entry.address || null,
-        associateId: entry.associateId || null,
-        status: entry.status || 'pending',
-        createdAt: new Date(),
-      };
+      const misEntry = toMemMisEntry(entry, inMemoryMisEntries.length + 1);
       inMemoryMisEntries.push(misEntry);
       persist();
       return misEntry;
@@ -599,23 +614,7 @@ export class PostgresStorage implements IStorage {
     if (!this.hasDatabase) {
       const results: MisEntry[] = [];
       for (const entry of entries) {
-        const nextId = inMemoryMisEntries.length + 1;
-        const misEntry: MisEntry = {
-          id: nextId,
-          sno: entry.sno || nextId,
-          leadId: entry.leadId,
-          customerName: entry.customerName,
-          product: entry.product || null,
-          businessName: entry.businessName || null,
-          entityType: entry.entityType || null,
-          branch: entry.branch || null,
-          initiationDate: entry.initiationDate || null,
-          mobileNumber: entry.mobileNumber || null,
-          address: entry.address || null,
-          associateId: entry.associateId || null,
-          status: entry.status || 'pending',
-          createdAt: new Date(),
-        };
+        const misEntry = toMemMisEntry(entry, inMemoryMisEntries.length + 1);
         inMemoryMisEntries.push(misEntry);
         results.push(misEntry);
       }

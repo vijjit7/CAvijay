@@ -14,7 +14,8 @@ import { tmpdir } from "os";
 import { join, extname } from "path";
 import dns from "dns";
 import net from "net";
-import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail, importWorkAllocationEmails } from "./gmail";
+import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail } from "./gmail";
+import { importGmailWorkAllocations } from "./mis-auto-import";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
 import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
@@ -4155,78 +4156,17 @@ showpage
   // Gmail import for MIS - connection:conn_google-mail_01KC3JM0FBYWW3J07BWC0CE8W6
   app.post("/api/mis/import-gmail", async (req, res) => {
     try {
-      const { associateId, daysBack = 7 } = req.body;
-      
-      if (!associateId) {
-        return res.status(400).json({ error: "Associate ID is required" });
-      }
-      
-      // Import emails from Gmail
-      const importResult = await importWorkAllocationEmails(daysBack);
-      
-      if (!importResult.success) {
-        return res.status(500).json({ error: importResult.message });
-      }
-      
-      if (importResult.entries.length === 0) {
-        return res.json({ 
-          entries: [], 
-          skipped: 0, 
-          message: importResult.message,
-          emailCount: importResult.emailCount
-        });
-      }
-      
-      // Convert to MIS entries format
-      const misEntries = importResult.entries.map(entry => ({
-        leadId: entry.leadId,
-        customerName: entry.customerName,
-        businessName: entry.businessName,
-        contactDetails: entry.mobileNumber,
-        customerAddress: entry.address,
-        inDate: entry.initiationDate,
-        outDate: null,
-        initiatedPerson: entry.initiatedPerson,
-        product: entry.product,
-        pdPerson: null,
-        pdTyping: null,
-        location: entry.branch,
-        status: "Pending",
-      }));
-      
-      // Filter out duplicates
-      const uniqueEntries = [];
-      for (const entry of misEntries) {
-        const existing = await storage.getMisEntryByLeadId(entry.leadId);
-        if (!existing) {
-          uniqueEntries.push(entry);
-        }
-      }
-      
-      if (uniqueEntries.length === 0) {
-        return res.json({ 
-          entries: [], 
-          skipped: misEntries.length,
-          message: `All ${misEntries.length} entries already exist in MIS`,
-          emailCount: importResult.emailCount
-        });
-      }
-      
-      // Add SNO and associate ID
-      let nextSno = await storage.getNextMisSno();
-      const entriesWithSno = uniqueEntries.map(entry => ({
-        ...entry,
-        associateId,
-        sno: nextSno++,
-      }));
-      
-      const result = await storage.createMisEntriesBulk(entriesWithSno);
-      
-      return res.json({ 
-        entries: result, 
-        skipped: misEntries.length - uniqueEntries.length,
-        message: `Imported ${result.length} entries from ${importResult.emailCount} emails`,
-        emailCount: importResult.emailCount
+      const { associateId, daysBack = 7 } = req.body || {};
+
+      // associateId is optional — defaults to ADMIN (unassigned pool) inside the
+      // shared helper, so the manual button and the scheduler share one path.
+      const summary = await importGmailWorkAllocations({ ownerId: associateId, daysBack });
+
+      return res.json({
+        added: summary.added,
+        skipped: summary.skipped,
+        message: summary.message,
+        emailCount: summary.emailCount,
       });
     } catch (error: any) {
       console.error("Gmail import error:", error);

@@ -40,6 +40,15 @@ export function isGmailOAuthConfigured(): boolean {
   return !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_TOKEN);
 }
 
+// Build a Gmail v1 client from the standard OAuth credentials (GMAIL_CLIENT_ID /
+// GMAIL_CLIENT_SECRET / GMAIL_TOKEN). The GMAIL_TOKEN refresh token must be minted
+// with the https://www.googleapis.com/auth/gmail.readonly scope so message reads
+// are permitted. Works anywhere (Railway / local), unlike the Replit connector.
+export function getGmailReadClient() {
+  const auth = getOAuthClient();
+  return google.gmail({ version: "v1", auth });
+}
+
 export async function fetchLoanProposalsByQuery(
   query: string = "subject:Loan Proposal",
   maxResults: number = 10
