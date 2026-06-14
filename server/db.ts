@@ -105,7 +105,13 @@ export async function ensureSchema(): Promise<void> {
       comment text NOT NULL DEFAULT '',
       row_index integer NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS associate_locations (
+      id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      associate_id varchar(10) NOT NULL REFERENCES users(id),
+      location text NOT NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    );
   `;
   await pool.query(ddl);
-  console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions verified');
+  console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions / associate_locations verified');
 }
