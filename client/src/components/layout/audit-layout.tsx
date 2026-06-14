@@ -15,7 +15,8 @@ import {
   FilePlus,
   Receipt,
   Wallet,
-  Landmark
+  Landmark,
+  MapPin
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
     { icon: Users, label: "Associates", path: "/associates" },
     { icon: ClipboardList, label: "MIS", path: "/mis" },
     { icon: BarChart3, label: "MIS Dashboard", path: "/mis-dashboard" },
+    { icon: MapPin, label: "Location Mapping", path: "/location-mapping" },
     { icon: Wallet, label: "Office Costing", path: "/office-costing" },
   ];
 

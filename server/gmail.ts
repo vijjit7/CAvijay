@@ -194,6 +194,33 @@ export interface WorkAllocationEntry {
   address: string | null;
   initiatedPerson: string | null;
   workNature?: string | null;
+  // Date the "New PD Assigned" email was received (DD-MMM-YYYY), used as the MIS
+  // in-date so newly-assigned work lands in the month it was actually received —
+  // not the (possibly earlier) loan initiation date in the email body.
+  receivedDate?: string | null;
+  // Received timestamp (ms) — internal, used only to keep the latest mail per lead.
+  receivedMs?: number;
+}
+
+// Format a Date as "DD-MMM-YYYY" (e.g. "21-May-2026") — the format the MIS in-date
+// column already uses, so existing parsing/grouping handles it unchanged.
+function formatDdMonYyyy(date: Date): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${day}-${months[date.getMonth()]}-${date.getFullYear()}`;
+}
+
+export interface ImportDiagnostics {
+  emailsMatched: number;       // messages returned by the Gmail query
+  truncated: boolean;          // hit the safety page cap (some emails not fetched)
+  nonPdSubject: number;        // matched the query but subject wasn't a genuine "New PD Assigned"
+  parseFailed: number;         // was a New PD Assigned email but yielded no Lead ID + Customer
+  processErrors: number;       // threw while fetching/parsing
+  parsedEntries: number;       // total entries parsed before de-duplication
+  uniqueByLead: number;        // collapsed on Lead ID alone
+  uniqueByLeadCustomer: number;// collapsed on Lead ID + Customer
+  uniqueByLeadCustomerMonth: number; // final key: Lead ID + Customer + received month
+  parseFailedSamples: string[];// up to 10 subject snippets that failed to parse
 }
 
 export interface EmailImportResult {
@@ -201,6 +228,7 @@ export interface EmailImportResult {
   message: string;
   entries: WorkAllocationEntry[];
   emailCount: number;
+  diagnostics?: ImportDiagnostics;
 }
 
 function parseWorkAllocationTable(htmlContent: string): WorkAllocationEntry[] {
@@ -459,16 +487,32 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
     // "PD sent back for review") reorder/insert columns and must be ignored.
     const query = `after:${afterDateStr} subject:"New PD Assigned"`;
     console.log(`Gmail search query: ${query}`);
-    
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 200
-    });
 
-    const messages = response.data.messages;
-    
-    if (!messages || messages.length === 0) {
+    // Page through ALL matching messages. The previous single call capped at 200 and
+    // silently dropped older allocations in busy months — loop on nextPageToken up to
+    // a generous safety ceiling so a full month's worth is never truncated unnoticed.
+    const MAX_MESSAGES = 2000;
+    const messages: { id?: string | null }[] = [];
+    let pageToken: string | undefined = undefined;
+    let truncated = false;
+    do {
+      const listParams: { userId: string; q: string; maxResults: number; pageToken?: string } = {
+        userId: 'me',
+        q: query,
+        maxResults: 500,
+      };
+      if (pageToken) listParams.pageToken = pageToken;
+      const response = await gmail.users.messages.list(listParams);
+      if (response.data.messages) messages.push(...response.data.messages);
+      pageToken = response.data.nextPageToken || undefined;
+      if (messages.length >= MAX_MESSAGES && pageToken) {
+        truncated = true;
+        console.warn(`[Gmail] Hit ${MAX_MESSAGES}-message safety cap — older "New PD Assigned" emails not fetched. Narrow the window.`);
+        break;
+      }
+    } while (pageToken);
+
+    if (messages.length === 0) {
       console.log('No work allocation emails found');
       return {
         success: true,
@@ -480,6 +524,10 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
 
     console.log(`Found ${messages.length} potential work allocation emails`);
     const allEntries: WorkAllocationEntry[] = [];
+    let nonPdSubject = 0;
+    let parseFailed = 0;
+    let processErrors = 0;
+    const parseFailedSamples: string[] = [];
 
     for (const message of messages) {
       if (!message.id) continue;
@@ -510,8 +558,16 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
         // the canonical table layout. Skip replies/forwards and status-update variants
         // ("PD Submitted", "PD sent back for review").
         if (!subjectHeader.trim().toLowerCase().startsWith('new pd assigned')) {
+          nonPdSubject++;
           continue;
         }
+
+        // When the email was received (Gmail's internalDate, ms since epoch). This
+        // becomes the MIS in-date so work is bucketed by the month it was assigned.
+        const internalMs = msgDetails.data.internalDate
+          ? parseInt(msgDetails.data.internalDate, 10)
+          : null;
+        const receivedDate = internalMs ? formatDdMonYyyy(new Date(internalMs)) : null;
 
         let bodyContent = '';
         const payload = msgDetails.data.payload;
@@ -549,28 +605,73 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
           entries.forEach(entry => {
             if (workNature && !entry.workNature) entry.workNature = workNature;
             if (!entry.initiatedPerson) entry.initiatedPerson = assignedTo || senderName;
+            entry.receivedDate = receivedDate;
+            if (internalMs != null) entry.receivedMs = internalMs;
           });
           console.log(`Parsed ${entries.length} entries from email ${message.id} (subject: "${subjectHeader.slice(0, 60)}", assignedTo: ${assignedTo})`);
           allEntries.push(...entries);
+        } else {
+          // A genuine "New PD Assigned" email that yielded no Lead ID + Customer — the
+          // subject labels and the body table both failed to parse. Counted so the gap
+          // between emails received and entries imported is never silent.
+          parseFailed++;
+          if (parseFailedSamples.length < 10) parseFailedSamples.push(subjectHeader.slice(0, 80));
+          console.warn(`[Gmail] No entry parsed from "New PD Assigned" email ${message.id} (subject: "${subjectHeader.slice(0, 80)}")`);
         }
       } catch (msgErr: any) {
+        processErrors++;
         console.error(`Error processing email ${message.id}:`, msgErr.message);
       }
     }
 
-    // Deduplicate by Lead ID, keeping the richest entry (most fields filled) — so the
-    // full-table "New PD Assigned" email wins over sparser status-update duplicates
-    // ("PD Submitted", "PD sent back for review") for the same lead.
+    // Deduplicate by Lead ID + Customer + received month. A single Piramal Lead ID is
+    // reused across customers (co-applicants are separate "New PD Assigned" emails on the
+    // same lead) AND re-assigned in later months — each is distinct work. Keying on
+    // lead+customer+month keeps all three apart while still collapsing genuine re-sends of
+    // the same email; this MUST match the importer's existence check (server/mis-auto-import)
+    // or work would be created then re-matched. When duplicates share the key, keep the
+    // LATEST received (its date is the in-date we want); ties fall back to the richest entry.
     const filledCount = (e: WorkAllocationEntry) =>
       Object.values(e).filter(v => v != null && String(v).trim() !== '').length;
-    const byLead = new Map<string, WorkAllocationEntry>();
+    const nameKey = (e: WorkAllocationEntry) =>
+      (e.customerName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const monthOf = (e: WorkAllocationEntry) => {
+      if (e.receivedMs == null) return 'unknown';
+      const d = new Date(e.receivedMs);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+    const dedupKey = (e: WorkAllocationEntry) => `${e.leadId}__${nameKey(e)}__${monthOf(e)}`;
+    const byKey = new Map<string, WorkAllocationEntry>();
     for (const entry of allEntries) {
-      const existing = byLead.get(entry.leadId);
-      if (!existing || filledCount(entry) > filledCount(existing)) {
-        byLead.set(entry.leadId, entry);
+      const key = dedupKey(entry);
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, entry);
+        continue;
+      }
+      const newer = (entry.receivedMs ?? 0) - (existing.receivedMs ?? 0);
+      if (newer > 0 || (newer === 0 && filledCount(entry) > filledCount(existing))) {
+        byKey.set(key, entry);
       }
     }
-    const uniqueEntries = Array.from(byLead.values());
+    const uniqueEntries = Array.from(byKey.values());
+
+    // How many each weaker key WOULD have collapsed to — purely for the gap report.
+    const uniqueByLead = new Set(allEntries.map(e => e.leadId)).size;
+    const uniqueByLeadCustomer = new Set(allEntries.map(e => `${e.leadId}__${nameKey(e)}`)).size;
+
+    const diagnostics: ImportDiagnostics = {
+      emailsMatched: messages.length,
+      truncated,
+      nonPdSubject,
+      parseFailed,
+      processErrors,
+      parsedEntries: allEntries.length,
+      uniqueByLead,
+      uniqueByLeadCustomer,
+      uniqueByLeadCustomerMonth: uniqueEntries.length,
+      parseFailedSamples,
+    };
 
     console.log(`Total unique entries extracted: ${uniqueEntries.length}`);
 
@@ -578,7 +679,8 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
       success: true,
       message: `Found ${uniqueEntries.length} unique work allocations from ${messages.length} emails`,
       entries: uniqueEntries,
-      emailCount: messages.length
+      emailCount: messages.length,
+      diagnostics,
     };
   } catch (error: any) {
     console.error('Error importing work allocation emails:', error.message);

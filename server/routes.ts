@@ -16,6 +16,7 @@ import dns from "dns";
 import net from "net";
 import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail } from "./gmail";
 import { importGmailWorkAllocations } from "./mis-auto-import";
+import { resolveAllocation, pickAssociateForLocation, allocationFields } from "./location-allocation";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
 import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
@@ -3852,8 +3853,12 @@ showpage
         return res.status(500).json({ error: `Error getting serial number: ${snoErr?.message || snoErr}` });
       }
       
+      // Auto-allocate to an associate by location match (no-op if already assigned
+      // or no mapping matches the address/branch).
+      const allocation = await resolveAllocation(entry);
+
       try {
-        const result = await storage.createMisEntry({ ...entry, sno: nextSno });
+        const result = await storage.createMisEntry({ ...entry, ...allocation, sno: nextSno });
         return res.json(result);
       } catch (dbError: any) {
         console.error("MIS single create: Database error:", dbError);
@@ -3938,12 +3943,27 @@ showpage
         return res.status(500).json({ error: `Error getting next serial number: ${snoErr?.message || snoErr}` });
       }
       
-      const entriesWithSno = uniqueEntries.map((entry: any) => ({
-        ...entry,
-        associateId,
-        sno: nextSno++,
-      }));
-      
+      // Pre-load the location map + associate names once, then auto-allocate each
+      // new case to the associate whose location keyword matches its address/branch.
+      const locationMappings = await storage.getAssociateLocations();
+      const associatesForAlloc = await storage.getAssociates();
+      const nameById = new Map(associatesForAlloc.map((a) => [a.id, a.name]));
+
+      const entriesWithSno = uniqueEntries.map((entry: any) => {
+        const alloc = entry.pdPersonId
+          ? {}
+          : allocationFields(
+              pickAssociateForLocation(locationMappings, entry.customerAddress, entry.location),
+              nameById,
+            );
+        return {
+          ...entry,
+          ...alloc,
+          associateId,
+          sno: nextSno++,
+        };
+      });
+
       console.log("MIS bulk: Creating", entriesWithSno.length, "entries");
       console.log("MIS bulk: First entry sample:", JSON.stringify(entriesWithSno[0]));
       
@@ -4027,6 +4047,104 @@ showpage
       console.error("Delete MIS entry error:", error);
       const errorMessage = error instanceof Error ? error.message : "Internal server error";
       return res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // ───────────────── Associate ↔ Location mapping (admin) ─────────────────
+  // Drives auto-allocation: each location keyword is handled by one associate, and
+  // new MIS cases are routed to the associate whose location matches the address.
+
+  app.get("/api/associate-locations", async (_req, res) => {
+    try {
+      const rows = await storage.getAssociateLocations();
+      return res.json(rows);
+    } catch (error) {
+      console.error("Get associate locations error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/associate-locations", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Admin only" });
+      }
+      const associateId = String(req.body?.associateId || "").trim();
+      const location = String(req.body?.location || "").trim();
+      if (!associateId || !location) {
+        return res.status(400).json({ error: "Associate and location are required" });
+      }
+
+      const associate = await storage.getUserById(associateId);
+      if (!associate || associate.id === 'ADMIN' || associate.id === 'PROP') {
+        return res.status(400).json({ error: "Invalid associate" });
+      }
+
+      // A location is handled by exactly one associate — reject case-insensitive dupes.
+      const existing = await storage.getAssociateLocations();
+      if (existing.some(r => r.location.trim().toLowerCase() === location.toLowerCase())) {
+        return res.status(409).json({ error: `Location "${location}" is already mapped` });
+      }
+
+      const row = await storage.createAssociateLocation({ associateId, location });
+      return res.status(201).json(row);
+    } catch (error) {
+      console.error("Create associate location error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/associate-locations/:id", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Admin only" });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+
+      const patch: { associateId?: string; location?: string } = {};
+
+      if (req.body?.associateId !== undefined) {
+        const associateId = String(req.body.associateId || "").trim();
+        const associate = await storage.getUserById(associateId);
+        if (!associate || associate.id === 'ADMIN' || associate.id === 'PROP') {
+          return res.status(400).json({ error: "Invalid associate" });
+        }
+        patch.associateId = associateId;
+      }
+
+      if (req.body?.location !== undefined) {
+        const location = String(req.body.location || "").trim();
+        if (!location) return res.status(400).json({ error: "Location cannot be empty" });
+        const existing = await storage.getAssociateLocations();
+        if (existing.some(r => r.id !== id && r.location.trim().toLowerCase() === location.toLowerCase())) {
+          return res.status(409).json({ error: `Location "${location}" is already mapped` });
+        }
+        patch.location = location;
+      }
+
+      const row = await storage.updateAssociateLocation(id, patch);
+      if (!row) return res.status(404).json({ error: "Location mapping not found" });
+      return res.json(row);
+    } catch (error) {
+      console.error("Update associate location error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/associate-locations/:id", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Admin only" });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+      const ok = await storage.deleteAssociateLocation(id);
+      if (!ok) return res.status(404).json({ error: "Location mapping not found" });
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Delete associate location error:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -4164,6 +4282,7 @@ showpage
 
       return res.json({
         added: summary.added,
+        updated: summary.updated,
         skipped: summary.skipped,
         message: summary.message,
         emailCount: summary.emailCount,

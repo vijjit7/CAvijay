@@ -290,6 +290,26 @@ export const insertMisEntrySchema = createInsertSchema(misEntries).omit({
 export type InsertMisEntry = z.infer<typeof insertMisEntrySchema>;
 export type MisEntry = typeof misEntries.$inferSelect;
 
+// Associate ↔ location coverage map. Each location (an area / branch keyword such as
+// "Kukatpally" or "Miyapur") is handled by exactly one associate. New MIS cases are
+// auto-allocated to the associate whose location keyword matches the case's address /
+// branch. Admins manage this mapping from the MIS dashboard's "Location Mapping" tab
+// and may reassign a location from one associate to another, or delete it entirely.
+export const associateLocations = pgTable("associate_locations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  associateId: varchar("associate_id", { length: 10 }).notNull().references(() => users.id),
+  location: text("location").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAssociateLocationSchema = createInsertSchema(associateLocations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAssociateLocation = z.infer<typeof insertAssociateLocationSchema>;
+export type AssociateLocation = typeof associateLocations.$inferSelect;
+
 // Archive statistics table - preserves dashboard numbers after reports are archived
 export const archiveStats = pgTable("archive_stats", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),

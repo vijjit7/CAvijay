@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BulkPayment, type BankStatement, type BankTransaction, users, reports, misEntries, archiveStats, expenses, bulkPayments, bankStatements, bankTransactions } from "@shared/schema";
+import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BulkPayment, type BankStatement, type BankTransaction, type AssociateLocation, type InsertAssociateLocation, users, reports, misEntries, archiveStats, expenses, bulkPayments, bankStatements, bankTransactions, associateLocations } from "@shared/schema";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -105,6 +105,8 @@ function loadDevState() {
     if (Array.isArray(s.bankStatements)) { inMemoryBankStatements.length = 0; inMemoryBankStatements.push(...reviveCreatedAt<BankStatement>(s.bankStatements)); }
     if (Array.isArray(s.bankTransactions)) { inMemoryBankTransactions.length = 0; inMemoryBankTransactions.push(...s.bankTransactions); }
     if (Array.isArray(s.bulkPayments)) { inMemoryBulkPayments.length = 0; inMemoryBulkPayments.push(...reviveCreatedAt<BulkPayment>(s.bulkPayments)); }
+    if (Array.isArray(s.associateLocations)) { inMemoryAssociateLocations.length = 0; inMemoryAssociateLocations.push(...reviveCreatedAt<AssociateLocation>(s.associateLocations)); }
+    if (typeof s.associateLocationSeq === 'number') memSeq.associateLocation = s.associateLocationSeq;
     if (typeof s.bulkPaymentSeq === 'number') memSeq.bulkPayment = s.bulkPaymentSeq;
     if (typeof s.expenseSeq === 'number') memSeq.expense = s.expenseSeq;
     if (typeof s.bankStmtSeq === 'number') memSeq.bankStmt = s.bankStmtSeq;
@@ -127,7 +129,9 @@ function saveDevStateNow() {
       bankStatements: inMemoryBankStatements,
       bankTransactions: inMemoryBankTransactions,
       bulkPayments: inMemoryBulkPayments,
+      associateLocations: inMemoryAssociateLocations,
       expenseSeq: memSeq.expense,
+      associateLocationSeq: memSeq.associateLocation,
       bulkPaymentSeq: memSeq.bulkPayment,
       bankStmtSeq: memSeq.bankStmt,
       bankTxnSeq: memSeq.bankTxn,
@@ -191,8 +195,14 @@ export interface IStorage {
   deleteMisEntry(id: number): Promise<boolean>;
   getNextMisSno(associateId?: string): Promise<number>;
   getMisEntryByLeadId(leadId: string): Promise<MisEntry | undefined>;
+  getMisEntriesByLeadId(leadId: string): Promise<MisEntry[]>;
   getMisEntryByLeadIdAndCustomerName(leadId: string, customerName: string): Promise<MisEntry | undefined>;
   getReportByLeadIdAndTitle(leadId: string, title: string): Promise<Report | undefined>;
+  // Associate ↔ location mapping (drives auto-allocation of new MIS cases)
+  getAssociateLocations(): Promise<AssociateLocation[]>;
+  createAssociateLocation(input: InsertAssociateLocation): Promise<AssociateLocation>;
+  updateAssociateLocation(id: number, patch: Partial<InsertAssociateLocation>): Promise<AssociateLocation | undefined>;
+  deleteAssociateLocation(id: number): Promise<boolean>;
   // Archive methods
   createArchiveStats(stats: InsertArchiveStats): Promise<ArchiveStats>;
   getArchiveStats(): Promise<ArchiveStats[]>;
@@ -298,7 +308,8 @@ const inMemoryExpenses: Expense[] = [];
 const inMemoryBankStatements: BankStatement[] = [];
 const inMemoryBankTransactions: BankTransaction[] = [];
 const inMemoryBulkPayments: BulkPayment[] = [];
-const memSeq = { expense: 1, bulkPayment: 1, bankStmt: 1, bankTxn: 1 };
+const inMemoryAssociateLocations: AssociateLocation[] = [];
+const memSeq = { expense: 1, bulkPayment: 1, bankStmt: 1, bankTxn: 1, associateLocation: 1 };
 loadDevState();
 
 export class PostgresStorage implements IStorage {
@@ -644,6 +655,14 @@ export class PostgresStorage implements IStorage {
   }
 
   async deleteMisEntry(id: number): Promise<boolean> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      const idx = inMemoryMisEntries.findIndex(e => e.id === id);
+      if (idx === -1) return false;
+      inMemoryMisEntries.splice(idx, 1);
+      persist();
+      return true;
+    }
     const result = await this.db.delete(misEntries).where(eq(misEntries.id, id));
     return (result.rowCount ?? 0) > 0;
   }
@@ -671,6 +690,17 @@ export class PostgresStorage implements IStorage {
     return result[0];
   }
 
+  // All MIS entries sharing a Lead ID. A Piramal Lead ID is reused across customers
+  // (co-applicants) and re-assigned in later months, so callers that need to tell
+  // genuinely-new work from a re-import must inspect every row for the lead, not just one.
+  async getMisEntriesByLeadId(leadId: string): Promise<MisEntry[]> {
+    // Fallback for local development
+    if (!this.hasDatabase) {
+      return inMemoryMisEntries.filter(e => e.leadId === leadId);
+    }
+    return this.db.select().from(misEntries).where(eq(misEntries.leadId, leadId));
+  }
+
   async getMisEntryByLeadIdAndCustomerName(leadId: string, customerName: string): Promise<MisEntry | undefined> {
     // Fallback for local development
     if (!this.hasDatabase) {
@@ -691,6 +721,58 @@ export class PostgresStorage implements IStorage {
       .where(and(eq(reports.leadId, leadId), eq(reports.title, title)))
       .limit(1);
     return result[0];
+  }
+
+  // Associate ↔ location mapping
+  async getAssociateLocations(): Promise<AssociateLocation[]> {
+    if (!this.hasDatabase) {
+      return [...inMemoryAssociateLocations].sort((a, b) =>
+        a.location.localeCompare(b.location));
+    }
+    return await this.db.select().from(associateLocations).orderBy(associateLocations.location);
+  }
+
+  async createAssociateLocation(input: InsertAssociateLocation): Promise<AssociateLocation> {
+    if (!this.hasDatabase) {
+      const row: AssociateLocation = {
+        id: memSeq.associateLocation++,
+        associateId: input.associateId,
+        location: input.location,
+        createdAt: new Date(),
+      };
+      inMemoryAssociateLocations.push(row);
+      persist();
+      return row;
+    }
+    const result = await this.db.insert(associateLocations).values(input).returning();
+    return result[0];
+  }
+
+  async updateAssociateLocation(id: number, patch: Partial<InsertAssociateLocation>): Promise<AssociateLocation | undefined> {
+    if (!this.hasDatabase) {
+      const idx = inMemoryAssociateLocations.findIndex(r => r.id === id);
+      if (idx === -1) return undefined;
+      inMemoryAssociateLocations[idx] = { ...inMemoryAssociateLocations[idx], ...patch };
+      persist();
+      return inMemoryAssociateLocations[idx];
+    }
+    const result = await this.db.update(associateLocations)
+      .set(patch)
+      .where(eq(associateLocations.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteAssociateLocation(id: number): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const idx = inMemoryAssociateLocations.findIndex(r => r.id === id);
+      if (idx === -1) return false;
+      inMemoryAssociateLocations.splice(idx, 1);
+      persist();
+      return true;
+    }
+    const result = await this.db.delete(associateLocations).where(eq(associateLocations.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Archive stats methods

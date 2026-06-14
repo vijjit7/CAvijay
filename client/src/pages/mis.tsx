@@ -291,10 +291,11 @@ export default function MisPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/mis"] });
       const added = data.added || 0;
+      const updated = data.updated || 0;
       const skipped = data.skipped || 0;
       toast({
-        title: added > 0 ? "New work imported" : "No new work",
-        description: `${added} new entr${added === 1 ? "y" : "ies"} added${skipped > 0 ? `, ${skipped} already in MIS` : ""} (from ${data.emailCount || 0} emails).`,
+        title: added > 0 ? "New work imported" : updated > 0 ? "In-dates updated" : "No new work",
+        description: `${added} new entr${added === 1 ? "y" : "ies"} added${updated > 0 ? `, ${updated} in-date${updated === 1 ? "" : "s"} corrected` : ""}${skipped > 0 ? `, ${skipped} already in MIS` : ""} (from ${data.emailCount || 0} emails).`,
       });
     },
     onError: (error: any) => {
