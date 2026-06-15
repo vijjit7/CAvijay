@@ -36,6 +36,12 @@ function normalizeName(s: string | null | undefined): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+// Current month bucket ("YYYY-MM"), matching monthKey's format.
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export interface GmailImportSummary {
   added: number;
   updated: number;
@@ -73,8 +79,27 @@ export async function importGmailWorkAllocations(opts: {
     return { added: 0, updated: 0, skipped: 0, emailCount: importResult.emailCount, message: importResult.message };
   }
 
+  // Only take on work whose Initiation Date falls in the current month. A "New PD
+  // Assigned" email can carry an older file (e.g. initiated last month) that we
+  // don't want to pull into the current month's MIS, so drop those outright.
+  const thisMonth = currentMonthKey();
+  const inMonthEntries = importResult.entries.filter(
+    (entry) => monthKey(entry.initiationDate) === thisMonth,
+  );
+  const droppedOutOfMonth = importResult.entries.length - inMonthEntries.length;
+
+  if (inMonthEntries.length === 0) {
+    return {
+      added: 0,
+      updated: 0,
+      skipped: droppedOutOfMonth,
+      emailCount: importResult.emailCount,
+      message: `Skipped ${droppedOutOfMonth} entries with an initiation date outside the current month`,
+    };
+  }
+
   // Map parsed entries to MIS rows (same shape as POST /api/mis/import-gmail).
-  const misRows = importResult.entries.map((entry) => ({
+  const misRows = inMonthEntries.map((entry) => ({
     leadId: entry.leadId,
     customerName: entry.customerName,
     businessName: entry.businessName,
@@ -128,7 +153,7 @@ export async function importGmailWorkAllocations(opts: {
     return {
       added: 0,
       updated,
-      skipped: misRows.length - updated,
+      skipped: misRows.length - updated + droppedOutOfMonth,
       emailCount: importResult.emailCount,
       message:
         updated > 0
@@ -159,7 +184,7 @@ export async function importGmailWorkAllocations(opts: {
   return {
     added: inserted.length,
     updated,
-    skipped: misRows.length - uniqueRows.length - updated,
+    skipped: misRows.length - uniqueRows.length - updated + droppedOutOfMonth,
     emailCount: importResult.emailCount,
     message:
       `Imported ${inserted.length} new entries from ${importResult.emailCount} emails` +
