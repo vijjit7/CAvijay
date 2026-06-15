@@ -74,6 +74,15 @@ export async function ensureSchema(): Promise<void> {
     );
     -- Backfill the part-payments column on expenses tables created before it existed.
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]';
+    -- Bill soft copies live in Postgres (not local disk) so they survive deploys/
+    -- restarts on hosts with an ephemeral filesystem (e.g. Render free plan). Kept
+    -- in a side table so listing expenses never pulls the binary blob.
+    CREATE TABLE IF NOT EXISTS expense_bills (
+      expense_id integer PRIMARY KEY REFERENCES expenses(id) ON DELETE CASCADE,
+      mime text NOT NULL,
+      data bytea NOT NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS bulk_payments (
       id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       date text NOT NULL,

@@ -127,19 +127,11 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
-// Bill uploads (office costing) — written to disk under uploads/bills/
-const BILLS_DIR = join(process.cwd(), "uploads", "bills");
-if (!existsSync(BILLS_DIR)) mkdirSync(BILLS_DIR, { recursive: true });
-
+// Bill uploads (office costing) — held in memory then persisted to Postgres
+// (expense_bills) rather than local disk, so soft copies survive redeploys/
+// restarts on hosts with an ephemeral filesystem (e.g. Render free plan).
 const billUpload = multer({
-  storage: multer.diskStorage({
-    destination: BILLS_DIR,
-    filename: (_req, file, cb) => {
-      const ext = extname(file.originalname).toLowerCase() || '.bin';
-      const stamp = Date.now().toString(36) + '-' + randomBytes(4).toString('hex');
-      cb(null, `bill-${stamp}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (_req, file, cb) => {
     const ok = ['image/jpeg', 'image/png', 'application/pdf'].includes(file.mimetype);
@@ -4337,11 +4329,10 @@ showpage
         return res.status(400).json({ error: "Admin cannot self-approve bills over ₹200. Please send to Vijay Togaru for approval." });
       }
 
-      const billFileUrl = req.file ? `/api/expenses/file/${req.file.filename}` : null;
       // Every bill must be supported by a soft copy. If none is attached, the
       // submitter must explain in the description why the soft copy is missing.
       const trimmedDescription = (description || '').trim();
-      if (!billFileUrl && !trimmedDescription) {
+      if (!req.file && !trimmedDescription) {
         return res.status(400).json({
           error: "A soft copy of the bill is required. If you cannot attach one, provide a description explaining why the soft copy is not available.",
         });
@@ -4360,10 +4351,15 @@ showpage
         description: trimmedDescription,
         amount: amt as any,
         approverId: finalApproverId,
-        billFileUrl,
+        billFileUrl: null,
         status,
         isOwnCost,
       });
+      // Persist the soft copy in Postgres and link it to the expense.
+      if (req.file) {
+        const billFileUrl = await storage.saveExpenseBill(created.id, req.file.mimetype, req.file.buffer);
+        created.billFileUrl = billFileUrl;
+      }
       return res.json(created);
     } catch (error: any) {
       console.error("Create expense error:", error);
@@ -4602,33 +4598,34 @@ showpage
     }
   });
 
-  // GET /api/expenses/file/:filename — stream bill (auth required)
-  app.get("/api/expenses/file/:filename", async (req, res) => {
+  // GET /api/expenses/:id/bill — stream a bill soft copy from Postgres (auth).
+  app.get("/api/expenses/:id/bill", async (req, res) => {
     try {
       const userId = requireAuth(req, res); if (!userId) return;
-      const filename = req.params.filename;
-      // Prevent path traversal
-      if (!/^bill-[a-z0-9-]+\.(jpg|jpeg|png|pdf)$/i.test(filename)) {
-        return res.status(400).json({ error: "Invalid filename" });
-      }
-      const path = join(BILLS_DIR, filename);
-      if (!existsSync(path)) return res.status(404).json({ error: "File not found" });
-      // Optional: enforce that user owns this expense or is admin
-      const url = `/api/expenses/file/${filename}`;
-      const all = await storage.getExpenses({});
-      const exp = all.find(e => e.billFileUrl === url);
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const exp = await storage.getExpenseById(id);
+      if (!exp) return res.status(404).json({ error: "File not found" });
+      // Only the submitter or an approver may view the bill.
       const isApprover = isApproverId(userId);
-      if (!exp || (!isApprover && exp.userId !== userId)) {
+      if (!isApprover && exp.userId !== userId) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const ext = extname(filename).toLowerCase();
-      const ct = ext === '.pdf' ? 'application/pdf' : ext === '.png' ? 'image/png' : 'image/jpeg';
-      res.setHeader('Content-Type', ct);
-      createReadStream(path).pipe(res);
+      const bill = await storage.getExpenseBill(id);
+      if (!bill) return res.status(404).json({ error: "File not found" });
+      res.setHeader('Content-Type', bill.mime || 'application/octet-stream');
+      return res.end(bill.data);
     } catch (error: any) {
       console.error("Bill file error:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
+  });
+
+  // Legacy disk-backed bills uploaded before bills moved into Postgres are gone
+  // on ephemeral-filesystem hosts; respond with a clear 410 instead of a raw 404.
+  app.get("/api/expenses/file/:filename", (req, res) => {
+    const userId = requireAuth(req, res); if (!userId) return;
+    return res.status(410).json({ error: "This bill was uploaded before bills were stored permanently and is no longer available. Please re-upload it." });
   });
 
   // GET /api/expenses/summary?months=12 — last N months stacked totals

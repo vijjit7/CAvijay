@@ -217,6 +217,8 @@ export interface IStorage {
   createExpense(expense: NewExpense): Promise<Expense>;
   getExpenses(filters?: { userId?: string; status?: ExpenseStatus; month?: string }): Promise<Expense[]>;
   getExpenseById(id: number): Promise<Expense | undefined>;
+  saveExpenseBill(expenseId: number, mime: string, data: Buffer): Promise<string>;
+  getExpenseBill(expenseId: number): Promise<{ mime: string; data: Buffer } | undefined>;
   updateExpenseStatus(
     id: number,
     status: ExpenseStatus,
@@ -305,6 +307,8 @@ function toMemMisEntry(entry: InsertMisEntry, id: number): MisEntry {
   };
 }
 const inMemoryExpenses: Expense[] = [];
+// Bill bytes for the no-database dev fallback, keyed by expense id.
+const inMemoryBills = new Map<number, { mime: string; data: Buffer }>();
 const inMemoryBankStatements: BankStatement[] = [];
 const inMemoryBankTransactions: BankTransaction[] = [];
 const inMemoryBulkPayments: BulkPayment[] = [];
@@ -903,6 +907,39 @@ export class PostgresStorage implements IStorage {
     }
     const result = await this.db.select().from(expenses).where(eq(expenses.id, id)).limit(1);
     return result[0];
+  }
+
+  // Persist a bill soft copy (image/PDF bytes) in Postgres, keyed by expense id,
+  // and point the expense's billFileUrl at the DB-backed stream route. Storing the
+  // bytes in the DB (not local disk) keeps bills readable after a redeploy on
+  // ephemeral-filesystem hosts. Returns the URL to fetch the bill.
+  async saveExpenseBill(expenseId: number, mime: string, data: Buffer): Promise<string> {
+    const url = `/api/expenses/${expenseId}/bill`;
+    if (!this.hasDatabase) {
+      inMemoryBills.set(expenseId, { mime, data });
+      const exp = inMemoryExpenses.find(e => e.id === expenseId);
+      if (exp) exp.billFileUrl = url;
+      persist();
+      return url;
+    }
+    await this.db.execute(
+      sql`INSERT INTO expense_bills (expense_id, mime, data) VALUES (${expenseId}, ${mime}, ${data})
+          ON CONFLICT (expense_id) DO UPDATE SET mime = EXCLUDED.mime, data = EXCLUDED.data`,
+    );
+    await this.db.update(expenses).set({ billFileUrl: url }).where(eq(expenses.id, expenseId));
+    return url;
+  }
+
+  async getExpenseBill(expenseId: number): Promise<{ mime: string; data: Buffer } | undefined> {
+    if (!this.hasDatabase) {
+      return inMemoryBills.get(expenseId);
+    }
+    const result = await this.db.execute(
+      sql`SELECT mime, data FROM expense_bills WHERE expense_id = ${expenseId} LIMIT 1`,
+    );
+    const row = (result.rows ?? [])[0] as { mime: string; data: any } | undefined;
+    if (!row) return undefined;
+    return { mime: row.mime, data: Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data) };
   }
 
   async updateExpenseStatus(
