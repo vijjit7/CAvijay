@@ -3429,8 +3429,9 @@ showpage
         name: user.name,
         role: user.role,
         avatar: user.avatar,
+        onLeave: user.onLeave ?? false,
       }));
-      
+
       return res.json(associatesWithoutPassword);
     } catch (error) {
       console.error("Get associates error:", error);
@@ -3786,6 +3787,31 @@ showpage
     }
   });
 
+  // Toggle an associate's "on leave" status (admin only). While on leave, new MIS
+  // cases are never auto-allocated to them — they route elsewhere or stay unassigned.
+  app.patch("/api/associates/:id/leave", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Admin only" });
+      }
+      const { id } = req.params;
+      const onLeave = Boolean(req.body?.onLeave);
+
+      const user = await storage.getUserById(id);
+      if (!user || user.id === 'ADMIN' || user.id === 'PROP') {
+        return res.status(400).json({ error: "Invalid associate" });
+      }
+
+      const ok = await storage.setUserOnLeave(id, onLeave);
+      if (!ok) return res.status(404).json({ error: "Associate not found" });
+      console.log(`Associate ${id} (${user.name}) set onLeave=${onLeave}`);
+      return res.json({ success: true, id, onLeave });
+    } catch (error) {
+      console.error("Set associate leave error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/dashboard", async (req, res) => {
     try {
       const { month, year } = req.query;
@@ -3940,12 +3966,15 @@ showpage
       const locationMappings = await storage.getAssociateLocations();
       const associatesForAlloc = await storage.getAssociates();
       const nameById = new Map(associatesForAlloc.map((a) => [a.id, a.name]));
+      // Associates on leave are skipped — exclude their pincodes from the pool.
+      const onLeaveIds = new Set(associatesForAlloc.filter((a) => a.onLeave).map((a) => a.id));
+      const activeMappings = locationMappings.filter((m) => !onLeaveIds.has(m.associateId));
 
       const entriesWithSno = uniqueEntries.map((entry: any) => {
         const alloc = entry.pdPersonId
           ? {}
           : allocationFields(
-              pickAssociateForPincode(locationMappings, entry.customerAddress),
+              pickAssociateForPincode(activeMappings, entry.customerAddress),
               nameById,
             );
         return {

@@ -74,6 +74,8 @@ export async function ensureSchema(): Promise<void> {
     );
     -- Backfill the part-payments column on expenses tables created before it existed.
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]';
+    -- Per-associate "on leave" flag: when true, auto-allocation skips the associate.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS on_leave boolean NOT NULL DEFAULT false;
     -- Bill soft copies live in Postgres (not local disk) so they survive deploys/
     -- restarts on hosts with an ephemeral filesystem (e.g. Render free plan). Kept
     -- in a side table so listing expenses never pulls the binary blob.

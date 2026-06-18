@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { MapPin, Plus, Pencil, Trash2, Check, X, GripVertical } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -14,6 +15,7 @@ type Associate = {
   id: string;
   name: string;
   username: string;
+  onLeave?: boolean;
 };
 
 type AssociatePincode = {
@@ -127,6 +129,28 @@ export default function PincodeMappingPage() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const leaveMutation = useMutation({
+    mutationFn: async ({ id, onLeave }: { id: string; onLeave: boolean }) => {
+      const res = await fetch(`/api/associates/${id}/leave`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onLeave }),
+      });
+      if (!res.ok) throw new Error(await readError(res, "Failed to update leave status"));
+      return res.json();
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/associates"] });
+      toast({
+        title: vars.onLeave ? "Associate paused" : "Associate active",
+        description: vars.onLeave
+          ? "New cases will not be auto-allocated to them while on leave."
+          : "New cases will be auto-allocated to them again.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   // Pincodes grouped under each associate, sorted numerically.
   const groups = useMemo(() => {
     return associates.map((a) => ({
@@ -179,6 +203,7 @@ export default function PincodeMappingPage() {
             <p className="text-slate-500">
               Each associate handles the pincodes listed under them. New cases are auto-allocated by
               matching the pincode in the customer address. Drag a pincode onto another associate to move it.
+              Switch an associate off when they're on leave to pause new allocations to them.
             </p>
           </div>
           <Badge variant="secondary" className="shrink-0">{mappings.length} pincodes</Badge>
@@ -193,17 +218,34 @@ export default function PincodeMappingPage() {
               return (
                 <Card
                   key={associate.id}
-                  className={isOver ? "ring-2 ring-blue-400 border-blue-300" : ""}
+                  className={`${isOver ? "ring-2 ring-blue-400 border-blue-300" : ""} ${associate.onLeave ? "bg-slate-50 border-dashed" : ""}`}
                   onDragOver={(e) => { e.preventDefault(); setDragOverAssoc(associate.id); }}
                   onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOverAssoc(null); }}
                   onDrop={() => handleDrop(associate.id)}
                   data-testid={`assoc-card-${associate.id}`}
                 >
-                  <CardHeader className="pb-3">
+                  <CardHeader className="pb-3 space-y-2">
                     <CardTitle className="flex items-center justify-between text-base">
-                      <span>{associate.name}</span>
+                      <span className="flex items-center gap-2">
+                        <span className={associate.onLeave ? "text-slate-500" : ""}>{associate.name}</span>
+                        {associate.onLeave && (
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-100">On leave</Badge>
+                        )}
+                      </span>
                       <Badge variant="outline">{pincodes.length}</Badge>
                     </CardTitle>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500">
+                        {associate.onLeave ? "Paused — no new cases" : "Active — receiving cases"}
+                      </span>
+                      <Switch
+                        checked={!associate.onLeave}
+                        onCheckedChange={(checked) => leaveMutation.mutate({ id: associate.id, onLeave: !checked })}
+                        disabled={leaveMutation.isPending}
+                        aria-label={`Toggle ${associate.name} on leave`}
+                        data-testid={`leave-toggle-${associate.id}`}
+                      />
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="max-h-[320px] overflow-y-auto pr-1 space-y-1">

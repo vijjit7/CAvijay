@@ -79,6 +79,9 @@ export async function resolveAllocation(row: {
   if (mappings.length === 0) return {};
   const associates = await storage.getAssociates();
   const nameById = new Map(associates.map((a) => [a.id, a.name]));
-  const associateId = pickAssociateForPincode(mappings, row.customerAddress);
+  // Don't route to associates who are on leave — drop their pincodes from the pool.
+  const onLeave = new Set(associates.filter((a) => a.onLeave).map((a) => a.id));
+  const active = mappings.filter((m) => !onLeave.has(m.associateId));
+  const associateId = pickAssociateForPincode(active, row.customerAddress);
   return allocationFields(associateId, nameById);
 }

@@ -212,6 +212,9 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   role: text("role").notNull(),
   avatar: text("avatar").notNull(),
+  // When true the associate is on leave: auto-allocation skips them and routes
+  // new cases elsewhere (or leaves them for an admin). Toggled from Pincode Mapping.
+  onLeave: boolean("on_leave").notNull().default(false),
 });
 
 export const reports = pgTable("reports", {

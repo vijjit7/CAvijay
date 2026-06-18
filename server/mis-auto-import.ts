@@ -167,12 +167,15 @@ export async function importGmailWorkAllocations(opts: {
   const locationMappings = await storage.getAssociateLocations();
   const associates = await storage.getAssociates();
   const nameById = new Map(associates.map((a) => [a.id, a.name]));
+  // Associates on leave are skipped — their pincodes are excluded from the pool.
+  const onLeave = new Set(associates.filter((a) => a.onLeave).map((a) => a.id));
+  const activeMappings = locationMappings.filter((m) => !onLeave.has(m.associateId));
 
   let nextSno = await storage.getNextMisSno();
   const entriesWithSno = uniqueRows.map((row) => ({
     ...row,
     ...allocationFields(
-      pickAssociateForPincode(locationMappings, row.customerAddress),
+      pickAssociateForPincode(activeMappings, row.customerAddress),
       nameById,
     ),
     associateId: ownerId,

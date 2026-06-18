@@ -18,15 +18,15 @@ import { eq, and, sql, desc } from "drizzle-orm";
 
 // Fallback users for local development when database is not available
 const DEFAULT_USERS: User[] = [
-  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '' },
-  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '' },
-  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '' },
-  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '' },
-  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '' },
-  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '' },
-  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '' },
-  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '' },
-  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '' }
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '', onLeave: false },
+  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '', onLeave: false },
+  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '', onLeave: false },
+  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '', onLeave: false }
 ];
 
 // Persist in-memory user changes (e.g. password updates) to disk so they
@@ -43,6 +43,7 @@ function loadDevUserOverrides() {
       if (target) {
         if (typeof o.password === 'string') target.password = o.password;
         if (typeof o.role === 'string') target.role = o.role;
+        if (typeof o.onLeave === 'boolean') target.onLeave = o.onLeave;
       } else if (o.id && o.username && o.name) {
         // A dev-created associate that isn't one of the built-in defaults —
         // re-add it so it survives restarts.
@@ -53,6 +54,7 @@ function loadDevUserOverrides() {
           name: o.name,
           role: o.role ?? 'Verification Officer',
           avatar: o.avatar ?? '',
+          onLeave: o.onLeave ?? false,
         });
       }
     }
@@ -162,6 +164,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   deleteUser(id: string): Promise<boolean>;
   updateUserPassword(id: string, password: string): Promise<boolean>;
+  setUserOnLeave(id: string, onLeave: boolean): Promise<boolean>;
   createReport(report: InsertReport & { id: string }): Promise<Report>;
   getReports(filters?: { 
     associateId?: string; 
@@ -363,6 +366,7 @@ export class PostgresStorage implements IStorage {
         name: u.name,
         role: u.role,
         avatar: u.avatar ?? '',
+        onLeave: u.onLeave ?? false,
       };
       DEFAULT_USERS.push(created);
       saveDevUserOverrides();
@@ -393,6 +397,18 @@ export class PostgresStorage implements IStorage {
       return true;
     }
     const result = await this.db.update(users).set({ password }).where(eq(users.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async setUserOnLeave(id: string, onLeave: boolean): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const user = DEFAULT_USERS.find(u => u.id === id);
+      if (!user) return false;
+      user.onLeave = onLeave;
+      saveDevUserOverrides();
+      return true;
+    }
+    const result = await this.db.update(users).set({ onLeave }).where(eq(users.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
