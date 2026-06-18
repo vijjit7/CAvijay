@@ -1,0 +1,97 @@
+-- Seed associate_locations (pincode coverage) on Postgres, matched by users.username.
+-- Idempotent: skips any pincode already present. Safe to re-run.
+-- 80 pincodes. Duplicate pincodes in the source sheet were resolved by
+-- leftmost-associate-wins; admins can reassign from the Pincode Mapping page.
+
+INSERT INTO associate_locations (associate_id, pincode)
+SELECT u.id, v.pin
+FROM (VALUES
+  ('bharat', '500004'),
+  ('bharat', '500016'),
+  ('bharat', '500018'),
+  ('bharat', '500019'),
+  ('bharat', '500032'),
+  ('bharat', '500034'),
+  ('bharat', '500037'),
+  ('bharat', '500038'),
+  ('bharat', '500043'),
+  ('bharat', '500045'),
+  ('bharat', '500049'),
+  ('bharat', '500050'),
+  ('bharat', '500055'),
+  ('bharat', '500072'),
+  ('bharat', '500081'),
+  ('bharat', '500082'),
+  ('bharat', '500090'),
+  ('bharat', '500118'),
+  ('bharat', '502032'),
+  ('bharat', '502319'),
+  ('anosh', '500075'),
+  ('anosh', '500006'),
+  ('anosh', '500053'),
+  ('anosh', '500048'),
+  ('anosh', '500067'),
+  ('anosh', '500064'),
+  ('anosh', '500028'),
+  ('anosh', '500077'),
+  ('anosh', '500036'),
+  ('anosh', '500086'),
+  ('anosh', '500008'),
+  ('anosh', '500030'),
+  ('anosh', '500091'),
+  ('anosh', '500002'),
+  ('anosh', '500005'),
+  ('anosh', '500052'),
+  ('shankar', '500097'),
+  ('shankar', '500058'),
+  ('shankar', '500079'),
+  ('shankar', '500059'),
+  ('shankar', '500023'),
+  ('shankar', '500065'),
+  ('shankar', '500070'),
+  ('shankar', '501505'),
+  ('shankar', '501510'),
+  ('prashanth', '500013'),
+  ('prashanth', '500024'),
+  ('prashanth', '500060'),
+  ('prashanth', '500068'),
+  ('prashanth', '500074'),
+  ('prashanth', '500035'),
+  ('prashanth', '500039'),
+  ('prashanth', '500088'),
+  ('prashanth', '500092'),
+  ('avinash', '500076'),
+  ('avinash', '500007'),
+  ('avinash', '500098'),
+  ('avinash', '500027'),
+  ('avinash', '500029'),
+  ('avinash', '500063'),
+  ('avinash', '500003'),
+  ('avinash', '500047'),
+  ('avinash', '500040'),
+  ('avinash', '501301'),
+  ('avinash', '500044'),
+  ('avinash', '500017'),
+  ('avinash', '500026'),
+  ('avinash', '500080'),
+  ('avinash', '500020'),
+  ('srikanth', '500062'),
+  ('srikanth', '500056'),
+  ('srikanth', '500083'),
+  ('srikanth', '500010'),
+  ('srikanth', '500051'),
+  ('srikanth', '500011'),
+  ('srikanth', '500087'),
+  ('srikanth', '500100'),
+  ('srikanth', '501401'),
+  ('srikanth', '500101'),
+  ('srikanth', '500015')
+) AS v(uname, pin)
+JOIN users u ON lower(u.username) = v.uname
+WHERE NOT EXISTS (
+  SELECT 1 FROM associate_locations al WHERE al.pincode = v.pin
+);
+
+SELECT u.username, u.name, count(*) AS pincodes
+FROM associate_locations al JOIN users u ON u.id = al.associate_id
+GROUP BY u.username, u.name ORDER BY pincodes DESC;

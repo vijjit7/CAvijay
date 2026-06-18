@@ -11,7 +11,7 @@ import LoginPage from "@/pages/login";
 import UploadPage from "@/pages/upload";
 import MisPage from "@/pages/mis";
 import MisDashboardPage from "@/pages/mis-dashboard";
-import LocationMappingPage from "@/pages/location-mapping";
+import PincodeMappingPage from "@/pages/pincode-mapping";
 import CreateReportPage from "@/pages/create-report";
 import AssociatesPage from "@/pages/associates";
 import BillPage from "@/pages/bill";
@@ -62,8 +62,8 @@ function Router() {
       <Route path="/mis-dashboard">
         <ProtectedRoute component={MisDashboardPage} />
       </Route>
-      <Route path="/location-mapping">
-        <ProtectedRoute component={LocationMappingPage} />
+      <Route path="/pincode-mapping">
+        <ProtectedRoute component={PincodeMappingPage} />
       </Route>
       <Route path="/create-report">
         <ProtectedRoute component={CreateReportPage} />

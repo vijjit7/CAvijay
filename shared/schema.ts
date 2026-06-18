@@ -290,15 +290,15 @@ export const insertMisEntrySchema = createInsertSchema(misEntries).omit({
 export type InsertMisEntry = z.infer<typeof insertMisEntrySchema>;
 export type MisEntry = typeof misEntries.$inferSelect;
 
-// Associate ↔ location coverage map. Each location (an area / branch keyword such as
-// "Kukatpally" or "Miyapur") is handled by exactly one associate. New MIS cases are
-// auto-allocated to the associate whose location keyword matches the case's address /
-// branch. Admins manage this mapping from the MIS dashboard's "Location Mapping" tab
-// and may reassign a location from one associate to another, or delete it entirely.
+// Associate ↔ pincode coverage map. Each 6-digit pincode is handled by exactly one
+// associate. New MIS cases are auto-allocated to the associate whose pincode matches
+// the pincode found in the case's customer address. Admins manage this mapping from
+// the "Pincode Mapping" page and may reassign a pincode from one associate to another,
+// add a new pincode, or delete one. (The table keeps its original name for continuity.)
 export const associateLocations = pgTable("associate_locations", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   associateId: varchar("associate_id", { length: 10 }).notNull().references(() => users.id),
-  location: text("location").notNull(),
+  pincode: text("pincode").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

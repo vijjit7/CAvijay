@@ -16,14 +16,14 @@ type Associate = {
   username: string;
 };
 
-type AssociateLocation = {
+type AssociatePincode = {
   id: number;
   associateId: string;
-  location: string;
+  pincode: string;
   createdAt: string;
 };
 
-export default function LocationMappingPage() {
+export default function PincodeMappingPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -43,7 +43,7 @@ export default function LocationMappingPage() {
     },
   });
 
-  const { data: mappings = [], isLoading } = useQuery<AssociateLocation[]>({
+  const { data: mappings = [], isLoading } = useQuery<AssociatePincode[]>({
     queryKey: ["/api/associate-locations"],
     queryFn: async () => {
       const res = await fetch("/api/associate-locations");
@@ -70,14 +70,16 @@ export default function LocationMappingPage() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["/api/associate-locations"] });
 
+  const isValidPincode = (v: string) => /^\d{6}$/.test(v);
+
   const createMutation = useMutation({
-    mutationFn: async (input: { associateId: string; location: string }) => {
+    mutationFn: async (input: { associateId: string; pincode: string }) => {
       const res = await fetch("/api/associate-locations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      if (!res.ok) throw new Error(await readError(res, "Failed to add location"));
+      if (!res.ok) throw new Error(await readError(res, "Failed to add pincode"));
       return res.json();
     },
     onSuccess: (_d, vars) => {
@@ -94,7 +96,7 @@ export default function LocationMappingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ associateId }),
       });
-      if (!res.ok) throw new Error(await readError(res, "Failed to move location"));
+      if (!res.ok) throw new Error(await readError(res, "Failed to move pincode"));
       return res.json();
     },
     onSuccess: invalidate,
@@ -102,13 +104,13 @@ export default function LocationMappingPage() {
   });
 
   const editMutation = useMutation({
-    mutationFn: async ({ id, location }: { id: number; location: string }) => {
+    mutationFn: async ({ id, pincode }: { id: number; pincode: string }) => {
       const res = await fetch(`/api/associate-locations/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location }),
+        body: JSON.stringify({ pincode }),
       });
-      if (!res.ok) throw new Error(await readError(res, "Failed to rename location"));
+      if (!res.ok) throw new Error(await readError(res, "Failed to update pincode"));
       return res.json();
     },
     onSuccess: () => { invalidate(); setEditingId(null); setEditValue(""); },
@@ -118,27 +120,40 @@ export default function LocationMappingPage() {
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/associate-locations/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await readError(res, "Failed to delete location"));
+      if (!res.ok) throw new Error(await readError(res, "Failed to delete pincode"));
       return res.json();
     },
     onSuccess: invalidate,
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  // Locations grouped under each associate, alphabetically.
+  // Pincodes grouped under each associate, sorted numerically.
   const groups = useMemo(() => {
     return associates.map((a) => ({
       associate: a,
-      locations: mappings
+      pincodes: mappings
         .filter((m) => m.associateId === a.id)
-        .sort((x, y) => x.location.localeCompare(y.location)),
+        .sort((x, y) => x.pincode.localeCompare(y.pincode)),
     }));
   }, [associates, mappings]);
+
+  const submitEdit = (id: number) => {
+    const v = editValue.trim();
+    if (!isValidPincode(v)) {
+      toast({ title: "Invalid pincode", description: "Enter exactly 6 digits", variant: "destructive" });
+      return;
+    }
+    editMutation.mutate({ id, pincode: v });
+  };
 
   const handleAdd = (associateId: string) => {
     const v = (addValues[associateId] || "").trim();
     if (!v) return;
-    createMutation.mutate({ associateId, location: v });
+    if (!isValidPincode(v)) {
+      toast({ title: "Invalid pincode", description: "Enter exactly 6 digits", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({ associateId, pincode: v });
   };
 
   const handleDrop = (associateId: string) => {
@@ -159,21 +174,21 @@ export default function LocationMappingPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
               <MapPin className="h-6 w-6 text-blue-600" />
-              Location Mapping
+              Pincode Mapping
             </h1>
             <p className="text-slate-500">
-              Each associate handles the locations listed under them. New cases are auto-allocated by
-              matching the address to these locations. Drag a location onto another associate to move it.
+              Each associate handles the pincodes listed under them. New cases are auto-allocated by
+              matching the pincode in the customer address. Drag a pincode onto another associate to move it.
             </p>
           </div>
-          <Badge variant="secondary" className="shrink-0">{mappings.length} locations</Badge>
+          <Badge variant="secondary" className="shrink-0">{mappings.length} pincodes</Badge>
         </div>
 
         {isLoading ? (
           <p className="text-sm text-slate-500">Loading…</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {groups.map(({ associate, locations }) => {
+            {groups.map(({ associate, pincodes }) => {
               const isOver = dragOverAssoc === associate.id;
               return (
                 <Card
@@ -187,17 +202,17 @@ export default function LocationMappingPage() {
                   <CardHeader className="pb-3">
                     <CardTitle className="flex items-center justify-between text-base">
                       <span>{associate.name}</span>
-                      <Badge variant="outline">{locations.length}</Badge>
+                      <Badge variant="outline">{pincodes.length}</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="max-h-[320px] overflow-y-auto pr-1 space-y-1">
-                      {locations.length === 0 && (
+                      {pincodes.length === 0 && (
                         <p className="text-xs text-slate-400 italic py-2">
-                          No locations. Drag one here or add below.
+                          No pincodes. Drag one here or add below.
                         </p>
                       )}
-                      {locations.map((loc) => (
+                      {pincodes.map((loc) => (
                         <div
                           key={loc.id}
                           draggable={editingId !== loc.id}
@@ -212,16 +227,18 @@ export default function LocationMappingPage() {
                             <>
                               <Input
                                 autoFocus
+                                inputMode="numeric"
+                                maxLength={6}
                                 value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
+                                onChange={(e) => setEditValue(e.target.value.replace(/\D/g, ""))}
                                 onKeyDown={(e) => {
-                                  if (e.key === "Enter" && editValue.trim()) editMutation.mutate({ id: loc.id, location: editValue.trim() });
+                                  if (e.key === "Enter") submitEdit(loc.id);
                                   if (e.key === "Escape") { setEditingId(null); setEditValue(""); }
                                 }}
                                 className="h-7 text-sm"
                               />
                               <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600"
-                                onClick={() => editValue.trim() && editMutation.mutate({ id: loc.id, location: editValue.trim() })}
+                                onClick={() => submitEdit(loc.id)}
                                 data-testid={`loc-save-${loc.id}`}>
                                 <Check className="h-4 w-4" />
                               </Button>
@@ -233,10 +250,10 @@ export default function LocationMappingPage() {
                           ) : (
                             <>
                               <GripVertical className="h-4 w-4 text-slate-300 shrink-0" />
-                              <span className="flex-1 truncate" title={loc.location}>{loc.location}</span>
+                              <span className="flex-1 truncate" title={loc.pincode}>{loc.pincode}</span>
                               <Button size="icon" variant="ghost"
                                 className="h-7 w-7 text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100"
-                                onClick={() => { setEditingId(loc.id); setEditValue(loc.location); }}
+                                onClick={() => { setEditingId(loc.id); setEditValue(loc.pincode); }}
                                 data-testid={`loc-edit-${loc.id}`}>
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
@@ -254,9 +271,11 @@ export default function LocationMappingPage() {
 
                     <div className="flex items-center gap-1 pt-1">
                       <Input
-                        placeholder="Add location…"
+                        placeholder="Add pincode…"
+                        inputMode="numeric"
+                        maxLength={6}
                         value={addValues[associate.id] || ""}
-                        onChange={(e) => setAddValues((p) => ({ ...p, [associate.id]: e.target.value }))}
+                        onChange={(e) => setAddValues((p) => ({ ...p, [associate.id]: e.target.value.replace(/\D/g, "") }))}
                         onKeyDown={(e) => { if (e.key === "Enter") handleAdd(associate.id); }}
                         className="h-8 text-sm"
                         data-testid={`loc-add-input-${associate.id}`}

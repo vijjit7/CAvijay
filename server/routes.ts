@@ -16,7 +16,7 @@ import dns from "dns";
 import net from "net";
 import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail } from "./gmail";
 import { importGmailWorkAllocations } from "./mis-auto-import";
-import { resolveAllocation, pickAssociateForLocation, allocationFields } from "./location-allocation";
+import { resolveAllocation, pickAssociateForPincode, allocationFields } from "./location-allocation";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
 import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
@@ -3845,8 +3845,8 @@ showpage
         return res.status(500).json({ error: `Error getting serial number: ${snoErr?.message || snoErr}` });
       }
       
-      // Auto-allocate to an associate by location match (no-op if already assigned
-      // or no mapping matches the address/branch).
+      // Auto-allocate to an associate by pincode match (no-op if already assigned
+      // or no mapped pincode appears in the customer address).
       const allocation = await resolveAllocation(entry);
 
       try {
@@ -3935,8 +3935,8 @@ showpage
         return res.status(500).json({ error: `Error getting next serial number: ${snoErr?.message || snoErr}` });
       }
       
-      // Pre-load the location map + associate names once, then auto-allocate each
-      // new case to the associate whose location keyword matches its address/branch.
+      // Pre-load the pincode map + associate names once, then auto-allocate each new
+      // case to the associate who owns the pincode found in its customer address.
       const locationMappings = await storage.getAssociateLocations();
       const associatesForAlloc = await storage.getAssociates();
       const nameById = new Map(associatesForAlloc.map((a) => [a.id, a.name]));
@@ -3945,7 +3945,7 @@ showpage
         const alloc = entry.pdPersonId
           ? {}
           : allocationFields(
-              pickAssociateForLocation(locationMappings, entry.customerAddress, entry.location),
+              pickAssociateForPincode(locationMappings, entry.customerAddress),
               nameById,
             );
         return {
@@ -4042,9 +4042,9 @@ showpage
     }
   });
 
-  // ───────────────── Associate ↔ Location mapping (admin) ─────────────────
-  // Drives auto-allocation: each location keyword is handled by one associate, and
-  // new MIS cases are routed to the associate whose location matches the address.
+  // ───────────────── Associate ↔ Pincode mapping (admin) ─────────────────
+  // Drives auto-allocation: each 6-digit pincode is handled by one associate, and new
+  // MIS cases are routed to the associate who owns the pincode found in the address.
 
   app.get("/api/associate-locations", async (_req, res) => {
     try {
@@ -4062,9 +4062,12 @@ showpage
         return res.status(403).json({ error: "Admin only" });
       }
       const associateId = String(req.body?.associateId || "").trim();
-      const location = String(req.body?.location || "").trim();
-      if (!associateId || !location) {
-        return res.status(400).json({ error: "Associate and location are required" });
+      const pincode = String(req.body?.pincode || "").trim();
+      if (!associateId || !pincode) {
+        return res.status(400).json({ error: "Associate and pincode are required" });
+      }
+      if (!/^\d{6}$/.test(pincode)) {
+        return res.status(400).json({ error: "Pincode must be exactly 6 digits" });
       }
 
       const associate = await storage.getUserById(associateId);
@@ -4072,13 +4075,13 @@ showpage
         return res.status(400).json({ error: "Invalid associate" });
       }
 
-      // A location is handled by exactly one associate — reject case-insensitive dupes.
+      // A pincode is handled by exactly one associate — reject duplicates.
       const existing = await storage.getAssociateLocations();
-      if (existing.some(r => r.location.trim().toLowerCase() === location.toLowerCase())) {
-        return res.status(409).json({ error: `Location "${location}" is already mapped` });
+      if (existing.some(r => r.pincode.trim() === pincode)) {
+        return res.status(409).json({ error: `Pincode "${pincode}" is already mapped` });
       }
 
-      const row = await storage.createAssociateLocation({ associateId, location });
+      const row = await storage.createAssociateLocation({ associateId, pincode });
       return res.status(201).json(row);
     } catch (error) {
       console.error("Create associate location error:", error);
@@ -4094,7 +4097,7 @@ showpage
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
-      const patch: { associateId?: string; location?: string } = {};
+      const patch: { associateId?: string; pincode?: string } = {};
 
       if (req.body?.associateId !== undefined) {
         const associateId = String(req.body.associateId || "").trim();
@@ -4105,14 +4108,16 @@ showpage
         patch.associateId = associateId;
       }
 
-      if (req.body?.location !== undefined) {
-        const location = String(req.body.location || "").trim();
-        if (!location) return res.status(400).json({ error: "Location cannot be empty" });
-        const existing = await storage.getAssociateLocations();
-        if (existing.some(r => r.id !== id && r.location.trim().toLowerCase() === location.toLowerCase())) {
-          return res.status(409).json({ error: `Location "${location}" is already mapped` });
+      if (req.body?.pincode !== undefined) {
+        const pincode = String(req.body.pincode || "").trim();
+        if (!/^\d{6}$/.test(pincode)) {
+          return res.status(400).json({ error: "Pincode must be exactly 6 digits" });
         }
-        patch.location = location;
+        const existing = await storage.getAssociateLocations();
+        if (existing.some(r => r.id !== id && r.pincode.trim() === pincode)) {
+          return res.status(409).json({ error: `Pincode "${pincode}" is already mapped` });
+        }
+        patch.pincode = pincode;
       }
 
       const row = await storage.updateAssociateLocation(id, patch);

@@ -117,10 +117,55 @@ export async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS associate_locations (
       id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       associate_id varchar(10) NOT NULL REFERENCES users(id),
-      location text NOT NULL,
+      pincode text NOT NULL,
       created_at timestamp NOT NULL DEFAULT now()
     );
+    -- Migrate deployments created before associate mapping switched from area-name
+    -- keywords to 6-digit pincodes. The old location strings can't be matched to
+    -- pincodes, so we clear them and let the pincode seed (below) repopulate.
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'associate_locations' AND column_name = 'location')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'associate_locations' AND column_name = 'pincode')
+      THEN
+        DELETE FROM associate_locations;
+        ALTER TABLE associate_locations RENAME COLUMN location TO pincode;
+      END IF;
+    END $$;
   `;
   await pool.query(ddl);
+  await seedAssociatePincodes();
   console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions / associate_locations verified');
+}
+
+// Populate the associate ↔ pincode map from the canonical PINCODES sheet the first
+// time the table is empty (e.g. right after the location→pincode migration clears it).
+// Idempotent and non-destructive: it only inserts when there are zero rows, so any
+// admin edits/deletes made afterwards are never undone. Matches associates by username
+// so it survives runtime-assigned ids.
+async function seedAssociatePincodes(): Promise<void> {
+  if (!pool) return;
+  const { ASSOCIATE_PINCODE_SEED } = await import("./associate-pincode-seed");
+  const { rows } = await pool.query<{ n: string }>("SELECT count(*) AS n FROM associate_locations");
+  if (Number(rows[0]?.n ?? 0) > 0) return;
+
+  const values: Array<{ username: string; pincode: string }> = [];
+  for (const a of ASSOCIATE_PINCODE_SEED) {
+    for (const pincode of a.pincodes) values.push({ username: a.username, pincode });
+  }
+  if (values.length === 0) return;
+
+  // One INSERT...SELECT joining the seed VALUES to users by username.
+  const tuples = values.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(", ");
+  const params = values.flatMap((v) => [v.username, v.pincode]);
+  const sql = `
+    INSERT INTO associate_locations (associate_id, pincode)
+    SELECT u.id, v.pincode
+    FROM (VALUES ${tuples}) AS v(uname, pincode)
+    JOIN users u ON lower(u.username) = v.uname
+  `;
+  const result = await pool.query(sql, params);
+  console.log(`[SERVER] seedAssociatePincodes: inserted ${result.rowCount ?? 0} pincode mappings`);
 }

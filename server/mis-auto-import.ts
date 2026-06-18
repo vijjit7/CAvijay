@@ -1,7 +1,7 @@
 import { importWorkAllocationEmails } from "./gmail";
 import { isGmailOAuthConfigured } from "./gmail-oauth";
 import { storage } from "./storage";
-import { pickAssociateForLocation, allocationFields } from "./location-allocation";
+import { pickAssociateForPincode, allocationFields } from "./location-allocation";
 
 // Default owner for auto-imported work. Entries land under ADMIN with the schema
 // default workflowStatus 'unassigned', so they appear in the in-tray for an admin
@@ -162,8 +162,8 @@ export async function importGmailWorkAllocations(opts: {
     };
   }
 
-  // Auto-allocate each new case to the associate whose mapped location matches its
-  // address / branch. Load the mapping + associate names once for the whole batch.
+  // Auto-allocate each new case to the associate who owns the pincode found in its
+  // customer address. Load the mapping + associate names once for the whole batch.
   const locationMappings = await storage.getAssociateLocations();
   const associates = await storage.getAssociates();
   const nameById = new Map(associates.map((a) => [a.id, a.name]));
@@ -172,7 +172,7 @@ export async function importGmailWorkAllocations(opts: {
   const entriesWithSno = uniqueRows.map((row) => ({
     ...row,
     ...allocationFields(
-      pickAssociateForLocation(locationMappings, row.customerAddress, row.location),
+      pickAssociateForPincode(locationMappings, row.customerAddress),
       nameById,
     ),
     associateId: ownerId,

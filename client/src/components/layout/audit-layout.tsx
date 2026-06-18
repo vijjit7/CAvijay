@@ -58,7 +58,7 @@ export default function AuditLayout({ children }: AuditLayoutProps) {
     { icon: Users, label: "Associates", path: "/associates" },
     { icon: ClipboardList, label: "MIS", path: "/mis" },
     { icon: BarChart3, label: "MIS Dashboard", path: "/mis-dashboard" },
-    { icon: MapPin, label: "Location Mapping", path: "/location-mapping" },
+    { icon: MapPin, label: "Pincode Mapping", path: "/pincode-mapping" },
     { icon: Wallet, label: "Office Costing", path: "/office-costing" },
   ];
 

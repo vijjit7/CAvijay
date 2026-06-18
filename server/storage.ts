@@ -727,13 +727,13 @@ export class PostgresStorage implements IStorage {
     return result[0];
   }
 
-  // Associate ↔ location mapping
+  // Associate ↔ pincode mapping
   async getAssociateLocations(): Promise<AssociateLocation[]> {
     if (!this.hasDatabase) {
       return [...inMemoryAssociateLocations].sort((a, b) =>
-        a.location.localeCompare(b.location));
+        (a.pincode || "").localeCompare(b.pincode || ""));
     }
-    return await this.db.select().from(associateLocations).orderBy(associateLocations.location);
+    return await this.db.select().from(associateLocations).orderBy(associateLocations.pincode);
   }
 
   async createAssociateLocation(input: InsertAssociateLocation): Promise<AssociateLocation> {
@@ -741,7 +741,7 @@ export class PostgresStorage implements IStorage {
       const row: AssociateLocation = {
         id: memSeq.associateLocation++,
         associateId: input.associateId,
-        location: input.location,
+        pincode: input.pincode,
         createdAt: new Date(),
       };
       inMemoryAssociateLocations.push(row);
