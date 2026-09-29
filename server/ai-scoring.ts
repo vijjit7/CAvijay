@@ -1,5 +1,18 @@
 import OpenAI from "openai";
 import type { ComprehensiveScoreResult } from "./openrouter";
+import { scoreComprehensiveRuleBased } from "./rule-scoring";
+
+// Fall back to the deterministic rule-based scorer when AI scoring is
+// unavailable or fails, so scores don't collapse to zero.
+function getFallbackScoreResult(pdfText: string, leadId: string, reason: string): ComprehensiveScoreResult {
+  console.warn(`[AI Scoring - ${leadId}] Falling back to rule-based scoring (${reason})`);
+  const ruleResult = scoreComprehensiveRuleBased(pdfText, leadId);
+  return {
+    ...ruleResult,
+    aiError: reason,
+    rationale: `AI unavailable (${reason}); scored with deterministic rule engine. ${ruleResult.rationale}`,
+  };
+}
 
 let openaiClient: OpenAI | null = null;
 
@@ -120,7 +133,11 @@ function calculateScore(matches: Record<string, boolean>, weights: Record<string
 export async function scoreComprehensiveWithAI(pdfText: string, leadId: string): Promise<ComprehensiveScoreResult> {
   console.log(`[AI Scoring - ${leadId}] Starting holistic AI scoring, text length: ${pdfText.length}`);
   const startTime = Date.now();
-  
+
+  if (!isAIConfigured()) {
+    return getFallbackScoreResult(pdfText, leadId, "AI_NOT_CONFIGURED");
+  }
+
   const client = getClient();
   
   // Truncate PDF text to fit within context limits
@@ -446,52 +463,6 @@ Analyze the report and respond with ONLY a JSON object (no markdown):
     };
   } catch (error: any) {
     console.error(`[AI Scoring - ${leadId}] Error:`, error?.message);
-    
-    return {
-      personal: 0,
-      business: 0,
-      banking: 0,
-      networth: 0,
-      existingDebt: 0,
-      endUse: 0,
-      referenceChecks: 0,
-      personalMatches: {
-        selfEducation: false, spouseName: false, spouseEducation: false, spouseEmployment: false,
-        mentionAboutKids: false, kidsEducation: false, kidsSchool: false, residenceVintage: false,
-        monthlyRentIfRented: false, residenceOwnedOrRented: false,
-      },
-      businessMatches: {
-        businessName: false, natureOfBusiness: false, existenceCurrentPlace: false, licensesRegistrations: false,
-        promoterExperienceQualifications: false, strategicVisionClarity: false, employeesSeen: false,
-        monthlyTurnover: false, clientListConcentrationRisk: false, activityDuringVisit: false,
-        monthlyIncome: false, seasonality: false, infraSupportsTurnover: false,
-        mfgRawMaterialSourcingStorage: false, mfgProcessFlow: false, mfgCapacityVsUtilization: false,
-        mfgMachineryMakeAutomationMaintenance: false, mfgInventoryFifoAging: false, mfgQualityControl: false,
-        tradingProductRangeInventoryMovement: false, tradingPurchaseSalesCycle: false, tradingWarehouseStockSeen: false,
-        svcDocumentationOfDelivery: false, svcTechnologySystems: false, svcClientListContractsRevenueModel: false,
-        svcContractBasedOrWalkin: false,
-      },
-      bankingMatches: {
-        primaryBankerName: false, turnoverCreditedPercent: false, bankingTenure: false,
-        emisRoutedBank: false, qrCodeSpotted: false,
-      },
-      networthMatches: {
-        propertiesOwned: false, vehiclesOwned: false, otherInvestments: false,
-        businessPlaceOwned: false, totalNetworthAvailable: false,
-      },
-      debtMatches: {
-        hasExistingLoans: false, loanListAvailable: false, canServiceNewLoan: false,
-        repaymentHistoryQuality: false, loansSourceBankNature: false,
-      },
-      endUseMatches: {
-        agreementValueAvailable: false, advancePaidCashOrBankAmount: false, willOccupyPostPurchase: false,
-        mortgageFundsUse: false, additionalUseInformation: false,
-      },
-      referenceMatches: {
-        personalRefNeighbours: false, businessRefBuyersSellers: false, invoiceVerification: false,
-      },
-      rationale: `AI scoring failed: ${error?.message || 'Unknown error'}`,
-      aiError: error?.message || 'Unknown error',
-    };
+    return getFallbackScoreResult(pdfText, leadId, `SCORING_FAILED: ${error?.message || 'Unknown error'}`);
   }
 }

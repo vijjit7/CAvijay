@@ -4287,13 +4287,24 @@ showpage
   // AI Integration status check
   app.get("/api/ai/status", (req, res) => {
     const configured = isAIConfigured();
+    // Report BOTH credential sources that isAIConfigured() actually checks:
+    // standard OPENROUTER_API_KEY (used in production/Railway) and the Replit
+    // AI Integrations vars (auto-injected on Replit). Previously this only
+    // surfaced the Integrations vars, so a correctly-set OPENROUTER_API_KEY
+    // showed hasApiKey:false and looked misconfigured.
+    const hasStandardKey = !!process.env.OPENROUTER_API_KEY;
+    const hasIntegrationsKey = !!(process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL && process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY);
     return res.json({
       configured,
-      hasBaseUrl: !!process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
-      hasApiKey: !!process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
-      message: configured 
-        ? "AI integration is configured and ready" 
-        : "AI integration not configured - comprehensive scoring will return zero scores"
+      hasApiKey: hasStandardKey || hasIntegrationsKey,
+      source: hasStandardKey ? "OPENROUTER_API_KEY" : hasIntegrationsKey ? "AI_INTEGRATIONS" : "none",
+      hasStandardKey,
+      hasIntegrationsKey,
+      // legacy fields retained for existing callers
+      hasBaseUrl: !!process.env.OPENROUTER_BASE_URL || !!process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
+      message: configured
+        ? "AI integration is configured and ready"
+        : "AI integration not configured - scoring will use the deterministic rule-based fallback"
     });
   });
 

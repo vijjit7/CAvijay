@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { scoreComprehensiveRuleBased } from "./rule-scoring";
 
 // Simple retry helper (replaces p-retry to avoid bundling issues)
 async function simpleRetry<T>(fn: () => Promise<T>, retries: number = 2, delay: number = 1000): Promise<T> {
@@ -328,11 +329,25 @@ function getDefaultScoreResult(rationale: string, aiError?: string): Comprehensi
   };
 }
 
+// When AI scoring is unavailable (no API key) or fails, fall back to the
+// deterministic rule-based scorer instead of zeroing every section. This keeps
+// the comprehensive/overall scores meaningful in environments where OpenRouter
+// isn't reachable (e.g. Railway without OPENROUTER_API_KEY set).
+function getFallbackScoreResult(pdfText: string, leadId: string, reason: string): ComprehensiveScoreResult {
+  console.warn(`[AI Scoring - ${leadId}] Falling back to rule-based scoring (${reason})`);
+  const ruleResult = scoreComprehensiveRuleBased(pdfText, leadId);
+  return {
+    ...ruleResult,
+    aiError: reason,
+    rationale: `AI unavailable (${reason}); scored with deterministic rule engine. ${ruleResult.rationale}`,
+  };
+}
+
 export async function scoreComprehensiveWithAI(pdfText: string, leadId: string): Promise<ComprehensiveScoreResult> {
   // Check if AI is configured
   if (!isAIConfigured()) {
-    console.error(`[AI Scoring - ${leadId}] AI not configured - returning zero scores`);
-    return getDefaultScoreResult("AI integration not configured", "AI_NOT_CONFIGURED");
+    console.error(`[AI Scoring - ${leadId}] AI not configured - using rule-based fallback`);
+    return getFallbackScoreResult(pdfText, leadId, "AI_NOT_CONFIGURED");
   }
   
   console.log(`[AI Scoring - ${leadId}] Starting comprehensive scoring, PDF text length: ${pdfText.length}`);
@@ -608,10 +623,7 @@ Respond ONLY with valid JSON.`;
       type: error?.type,
       stack: error?.stack?.substring(0, 500),
     });
-    return getDefaultScoreResult(
-      `AI scoring failed: ${errorMsg} - manual review required`,
-      `SCORING_FAILED: ${errorMsg}`
-    );
+    return getFallbackScoreResult(pdfText, leadId, `SCORING_FAILED: ${errorMsg}`);
   }
 }
 
