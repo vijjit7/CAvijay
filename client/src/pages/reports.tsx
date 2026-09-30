@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, Filter, ArrowRightLeft, Calendar, Info, AlertCircle, CheckCircle, Camera, ShieldCheck, Activity, Image as ImageIcon, AlertTriangle, Scale, BrainCircuit, Clock, Timer, Trash2, Download, RefreshCw, FileText, Edit } from "lucide-react";
+import { Search, Filter, ArrowRightLeft, Calendar, Info, AlertCircle, CheckCircle, Camera, ShieldCheck, Activity, Image as ImageIcon, Scale, BrainCircuit, Clock, Timer, Trash2, Download, RefreshCw, FileText, Edit } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
@@ -459,7 +459,6 @@ export default function ReportsPage() {
                 const associate = getAssociate(report.associateId);
                 const isSelected = selectedReports.includes(report.id);
                 const missingCount = report.metrics ? (report.metrics.totalFields - report.metrics.filledFields) : 0;
-                const photoMismatchCount = report.metrics?.photoValidation?.missedDetails.length || 0;
                 const missingFieldsList = report.metrics?.missingFields || [];
                 const remainingMissingCount = Math.max(0, missingCount - missingFieldsList.length);
                 
@@ -523,8 +522,7 @@ export default function ReportsPage() {
                                   </TooltipProvider>
                                 )}
                               </span>
-                              <span className={`text-xs flex items-center gap-1 ${photoMismatchCount > 0 ? 'text-amber-600 font-medium' : ''}`}>
-                                {photoMismatchCount > 0 && <AlertTriangle className="h-3 w-3" />}
+                              <span className="text-xs flex items-center gap-1">
                                 <span className="font-bold text-slate-900">{report.scores.comprehensive}%</span>
                               </span>
                             </div>

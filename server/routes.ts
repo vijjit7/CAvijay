@@ -1364,22 +1364,6 @@ export async function registerRoutes(
       const checkCount = 2 + (leadHash % 4);
       const selectedChecks = allDueDiligenceChecks.slice(0, checkCount);
 
-      const allMissedDetails = [
-        'House color differs from description',
-        'Landmark mismatch in photos',
-        'Business signboard not visible in photos',
-        'Number of employees differs from report',
-        'Vehicle count mismatch',
-        'Property boundary unclear',
-        'Neighboring shop details inconsistent',
-        'Street name not matching',
-        'Building structure differs from description',
-        'Asset condition not as reported'
-      ];
-      // Deterministic selection based on comprehensive score
-      const missedCount = comprehensiveScore < 85 ? Math.max(0, Math.floor((85 - comprehensiveScore) / 10)) : 0;
-      const selectedMissed = allMissedDetails.slice(0, missedCount);
-
       const allRemarks = [
         'Name board clearly visible at premises',
         'Business activity observed during visit',
@@ -1519,7 +1503,7 @@ export async function registerRoutes(
           photoValidation: {
             matchedCount: Math.floor(photoCount * 0.8),
             totalKeyDetails: photoCount,
-            missedDetails: selectedMissed
+            missedDetails: []
           }
         },
         scores: {
@@ -1795,22 +1779,6 @@ export async function registerRoutes(
       const checkCount = 2 + (leadHash % 4);
       const selectedChecks = allDueDiligenceChecks.slice(0, checkCount);
 
-      const allMissedDetails = [
-        'House color differs from description',
-        'Landmark mismatch in photos',
-        'Business signboard not visible in photos',
-        'Number of employees differs from report',
-        'Vehicle count mismatch',
-        'Property boundary unclear',
-        'Neighboring shop details inconsistent',
-        'Street name not matching',
-        'Building structure differs from description',
-        'Asset condition not as reported'
-      ];
-      // Deterministic selection based on comprehensive score
-      const missedCount = comprehensiveScore < 85 ? Math.max(0, Math.floor((85 - comprehensiveScore) / 10)) : 0;
-      const selectedMissed = allMissedDetails.slice(0, missedCount);
-
       const allRemarks = [
         'Name board clearly visible at premises',
         'Business activity observed during visit',
@@ -1948,7 +1916,7 @@ export async function registerRoutes(
           photoValidation: {
             matchedCount: Math.floor(photoCount * 0.8),
             totalKeyDetails: photoCount,
-            missedDetails: selectedMissed
+            missedDetails: []
           }
         },
         scores: {
