@@ -244,7 +244,7 @@ Analyze the report and respond with ONLY a JSON object (no markdown):
 
   try {
     const response = await client.chat.completions.create({
-      model: "anthropic/claude-3-haiku",
+      model: "anthropic/claude-haiku-4.5",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 2048,
       temperature: 0,

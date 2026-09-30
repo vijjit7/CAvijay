@@ -133,7 +133,7 @@ Respond ONLY with valid JSON, no additional text.`;
 
   const response = await simpleRetry(async () => {
     const result = await getOpenRouterClient().chat.completions.create({
-      model: "anthropic/claude-3-haiku",
+      model: "anthropic/claude-haiku-4.5",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 2048,
     });
@@ -495,7 +495,7 @@ Respond ONLY with valid JSON.`;
     const response = await simpleRetry(async () => {
       console.log(`[AI Scoring - ${leadId}] Making API request to OpenRouter...`);
       const result = await getOpenRouterClient().chat.completions.create({
-        model: "anthropic/claude-3-haiku",
+        model: "anthropic/claude-haiku-4.5",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 2048,
       });

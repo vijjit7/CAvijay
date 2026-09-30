@@ -183,6 +183,12 @@ export type ReportScores = {
   quality: number;
   overall: number;
   comprehensiveBreakdown?: ComprehensiveBreakdown;
+  // How the comprehensive score was produced. 'rule-based' means AI scoring was
+  // unavailable/failed and the deterministic regex engine was used as a fallback,
+  // which under-reads narrative reports — surfaced in the UI so a degraded score
+  // isn't mistaken for a genuinely low one. aiError holds the fallback reason.
+  scoringMethod?: 'ai' | 'rule-based';
+  aiError?: string;
 };
 
 export type ReportTAT = {

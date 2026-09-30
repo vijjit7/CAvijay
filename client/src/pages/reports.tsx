@@ -503,8 +503,25 @@ export default function ReportsPage() {
                         <HoverCardTrigger>
                           <div className="space-y-1 w-[140px] cursor-help">
                             <div className="flex justify-between text-xs items-end">
-                              <span className="text-slate-500">
+                              <span className="text-slate-500 flex items-center gap-1">
                                 {report.metrics?.riskAnalysisDepth || 'Medium'} Risk Analysis
+                                {report.scores.scoringMethod === 'rule-based' && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="inline-flex items-center rounded-sm bg-amber-100 text-amber-700 px-1 py-0 text-[9px] font-semibold leading-tight cursor-help">
+                                          Rule-based
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-[240px] text-xs">
+                                        AI scoring was unavailable, so this score came from the deterministic
+                                        fallback engine, which under-reads narrative reports. Re-score once AI
+                                        is available for an accurate result.
+                                        {report.scores.aiError ? ` (${report.scores.aiError})` : ''}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
                               </span>
                               <span className={`text-xs flex items-center gap-1 ${photoMismatchCount > 0 ? 'text-amber-600 font-medium' : ''}`}>
                                 {photoMismatchCount > 0 && <AlertTriangle className="h-3 w-3" />}

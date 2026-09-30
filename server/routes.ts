@@ -1527,6 +1527,8 @@ export async function registerRoutes(
           comprehensive: comprehensiveScore,
           quality: qualityScore,
           overall: overallScore,
+          scoringMethod: aiScores.aiError ? 'rule-based' : 'ai',
+          aiError: aiScores.aiError,
           comprehensiveBreakdown: {
             personal: personalScore,
             personalMatches,
@@ -1954,6 +1956,8 @@ export async function registerRoutes(
           comprehensive: comprehensiveScore,
           quality: qualityScore,
           overall: overallScore,
+          scoringMethod: aiScores.aiError ? 'rule-based' : 'ai',
+          aiError: aiScores.aiError,
           comprehensiveBreakdown: {
             personal: personalScore,
             personalMatches,
@@ -2811,6 +2815,9 @@ showpage
           quality: Math.round((scoringResult.scores.personal + scoringResult.scores.business) / 45 * 100),
           completeness: Math.round(scoringResult.scores.total),
           comprehensive: scoringResult.scores.total,
+          // Initial deterministic score; the async AI job below upgrades this to
+          // 'ai' when it succeeds (or leaves it 'rule-based' if AI is unavailable).
+          scoringMethod: 'rule-based',
           comprehensiveBreakdown: scoringResult.breakdown
         },
         decision: {
@@ -2868,6 +2875,8 @@ showpage
               completeness: Math.round(scoringResult.scores.total),
               comprehensive: aiComprehensive,
               deterministicScore: scoringResult.scores.total,
+              scoringMethod: aiScores.aiError ? 'rule-based' : 'ai',
+              aiError: aiScores.aiError,
               comprehensiveBreakdown: {
                 personal: aiScores.personal,
                 business: aiScores.business,
@@ -3291,6 +3300,8 @@ showpage
         quality: qualityScore,
         completeness: completenessScore,
         comprehensive: comprehensiveScore,
+        scoringMethod: scores.aiError ? 'rule-based' : 'ai',
+        aiError: scores.aiError,
         comprehensiveBreakdown: {
           personal: personalScore,
           business: businessScore,

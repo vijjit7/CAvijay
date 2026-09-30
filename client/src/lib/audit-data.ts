@@ -33,6 +33,10 @@ export interface Report {
     comprehensive: number;
     quality: number;
     overall: number;
+    comprehensiveBreakdown?: any;
+    // 'rule-based' means AI scoring fell back to the deterministic regex engine.
+    scoringMethod?: 'ai' | 'rule-based';
+    aiError?: string;
   };
   decision: {
     status: 'Positive' | 'Negative' | 'Credit Refer';
