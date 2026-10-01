@@ -76,6 +76,11 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]';
     -- Per-associate "on leave" flag: when true, auto-allocation skips the associate.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS on_leave boolean NOT NULL DEFAULT false;
+    -- Customer non-availability workflow: full initiator email (to notify), the
+    -- rescheduled appointment date, and the reason recorded on the MIS entry.
+    ALTER TABLE mis_entries ADD COLUMN IF NOT EXISTS initiated_person_email text;
+    ALTER TABLE mis_entries ADD COLUMN IF NOT EXISTS appointment_date text;
+    ALTER TABLE mis_entries ADD COLUMN IF NOT EXISTS availability_note text;
     -- Bill soft copies live in Postgres (not local disk) so they survive deploys/
     -- restarts on hosts with an ephemeral filesystem (e.g. Render free plan). Kept
     -- in a side table so listing expenses never pulls the binary blob.

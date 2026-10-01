@@ -107,6 +107,38 @@ export async function sendTestEmail(to: string, from: string): Promise<{ success
   }
 }
 
+// Send a plain-text email from the connected Gmail account. `from` defaults to the
+// connected account's own address, so callers only need to supply recipient + content.
+export async function sendMail(opts: { to: string; subject: string; body: string; from?: string }): Promise<void> {
+  const gmail = await getGmailClient();
+
+  let from = opts.from;
+  if (!from) {
+    try {
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      from = profile.data.emailAddress || 'me';
+    } catch {
+      from = 'me';
+    }
+  }
+
+  const emailContent = [
+    `To: ${opts.to}`,
+    `From: ${from}`,
+    `Subject: ${opts.subject}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    opts.body,
+  ].join('\r\n');
+
+  const encodedEmail = Buffer.from(emailContent).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: encodedEmail },
+  });
+}
+
 export async function searchTriggerEmail(leadId: string): Promise<TriggerEmailInfo | null> {
   try {
     console.log(`Searching Gmail for Lead ID: ${leadId}`);
@@ -193,6 +225,9 @@ export interface WorkAllocationEntry {
   mobileNumber: string | null;
   address: string | null;
   initiatedPerson: string | null;
+  // Full email address of the initiator (kept so we can notify them directly). The
+  // display field `initiatedPerson` remains the local part only.
+  initiatedPersonEmail?: string | null;
   workNature?: string | null;
   // Date the "New PD Assigned" email was received (DD-MMM-YYYY), used as the MIS
   // in-date so newly-assigned work lands in the month it was actually received —
@@ -422,7 +457,8 @@ function extractWorkNature(text: string): string | null {
 // The person the work was assigned to: the "To" recipient that isn't the connected
 // account ("me"). Returns the address local-part (e.g. "barigela.jagadeeshbabu"),
 // mirroring the manual-paste behaviour.
-function extractInitiatedPerson(toHeader: string, ownerEmail: string | null): string | null {
+// The full recipient email that isn't the connected account — this is the initiator.
+function extractInitiatedEmail(toHeader: string, ownerEmail: string | null): string | null {
   if (!toHeader) return null;
   const parts = toHeader.split(',').map(s => s.trim()).filter(Boolean);
   for (const p of parts) {
@@ -430,10 +466,14 @@ function extractInitiatedPerson(toHeader: string, ownerEmail: string | null): st
     const email = (emailMatch ? emailMatch[1] : p).trim().toLowerCase();
     if (!email.includes('@')) continue;
     if (ownerEmail && email === ownerEmail.toLowerCase()) continue; // skip "me"
-    const local = email.split('@')[0];
-    if (local) return local;
+    return email;
   }
   return null;
+}
+
+function extractInitiatedPerson(toHeader: string, ownerEmail: string | null): string | null {
+  const email = extractInitiatedEmail(toHeader, ownerEmail);
+  return email ? email.split('@')[0] : null;
 }
 
 function extractBodyFromParts(parts: any[], preferHtml: boolean = true): string {
@@ -602,9 +642,11 @@ export async function importWorkAllocationEmails(daysBack: number = 7): Promise<
           const toHeader = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
           const workNature = extractWorkNature(bodyContent);
           const assignedTo = extractInitiatedPerson(toHeader, ownerEmail);
+          const assignedEmail = extractInitiatedEmail(toHeader, ownerEmail);
           entries.forEach(entry => {
             if (workNature && !entry.workNature) entry.workNature = workNature;
             if (!entry.initiatedPerson) entry.initiatedPerson = assignedTo || senderName;
+            if (!entry.initiatedPersonEmail && assignedEmail) entry.initiatedPersonEmail = assignedEmail;
             entry.receivedDate = receivedDate;
             if (internalMs != null) entry.receivedMs = internalMs;
           });

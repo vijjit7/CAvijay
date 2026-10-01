@@ -279,6 +279,14 @@ export const misEntries = pgTable("mis_entries", {
   inDate: text("in_date"),
   outDate: text("out_date"),
   initiatedPerson: text("initiated_person"),
+  // Full email address of the initiating person (stored going forward from the Gmail
+  // importer). Used to notify them when the customer is not available for PD.
+  initiatedPersonEmail: text("initiated_person_email"),
+  // Rescheduled appointment date (storage format) captured when the customer is not
+  // available; the case stays in the associate's intray until this date.
+  appointmentDate: text("appointment_date"),
+  // Reason recorded when notifying the initiator (e.g. "Customer Not Available").
+  availabilityNote: text("availability_note"),
   product: text("product"),
   pdPerson: text("pd_person"),
   pdTyping: text("pd_typing"),

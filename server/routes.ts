@@ -14,7 +14,7 @@ import { tmpdir } from "os";
 import { join, extname } from "path";
 import dns from "dns";
 import net from "net";
-import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail } from "./gmail";
+import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail, sendMail } from "./gmail";
 import { importGmailWorkAllocations } from "./mis-auto-import";
 import { resolveAllocation, pickAssociateForPincode, allocationFields } from "./location-allocation";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
@@ -4023,6 +4023,66 @@ showpage
     } catch (error) {
       console.error("Update MIS entry error:", error);
       return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Notify the initiating person that the customer is not available and has given a
+  // fresh appointment. The case stays in the associate's intray (status untouched) so
+  // they revisit it on the appointment date. Available to admin and the assigned
+  // associate, since the associate is the one who discovers the non-availability.
+  app.post("/api/mis/:id/notify-unavailable", async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(401).json({ error: "Not authenticated" });
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID provided" });
+
+      const { to, appointmentDate, reason } = req.body || {};
+      const recipient = typeof to === "string" ? to.trim() : "";
+      const apptDate = typeof appointmentDate === "string" ? appointmentDate.trim() : "";
+      const note = (typeof reason === "string" && reason.trim()) || "Customer Not Available";
+
+      if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+        return res.status(400).json({ error: "A valid recipient email is required" });
+      }
+      if (!apptDate) {
+        return res.status(400).json({ error: "An appointment date is required" });
+      }
+
+      const entries = await storage.getMisEntries();
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return res.status(404).json({ error: "MIS entry not found" });
+
+      const isAdmin = userId === "ADMIN";
+      const isAssigned = entry.pdPersonId === userId || entry.associateId === userId;
+      if (!isAdmin && !isAssigned) {
+        return res.status(403).json({ error: "You can only notify for cases assigned to you" });
+      }
+
+      const subject = `Customer Not Available - ${entry.leadId}${entry.customerName ? ` (${entry.customerName})` : ""}`;
+      const body = [
+        "Dear Sir,",
+        "",
+        `Respective customer is not available and has given appointment on ${apptDate} and will be completed by that date`,
+        "",
+        "Regards",
+      ].join("\r\n");
+
+      await sendMail({ to: recipient, subject, body });
+
+      // Record the appointment + reason so it is visible on the entry. Status/workflow
+      // are left as-is so the case remains in the associate's intray.
+      const updated = await storage.updateMisEntry(id, {
+        initiatedPersonEmail: recipient,
+        appointmentDate: apptDate,
+        availabilityNote: note,
+      });
+
+      return res.json({ success: true, entry: updated });
+    } catch (error: any) {
+      console.error("Notify customer-unavailable error:", error);
+      return res.status(500).json({ error: error.message || "Failed to send notification" });
     }
   });
 

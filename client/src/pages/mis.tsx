@@ -92,6 +92,11 @@ export default function MisPage() {
   const [pasteContent, setPasteContent] = useState("");
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<MisEntry | null>(null);
+  // Customer non-availability notification (from within the Edit MIS Entry dialog).
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [notifyReason, setNotifyReason] = useState("Customer Not Available");
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [notifyApptDate, setNotifyApptDate] = useState<string | null>(null);
   const [manualEntryDialogOpen, setManualEntryDialogOpen] = useState(false);
   const [manualEntry, setManualEntry] = useState({
     leadId: "",
@@ -327,6 +332,29 @@ export default function MisPage() {
     },
   });
 
+  const notifyUnavailableMutation = useMutation({
+    mutationFn: async ({ id, to, appointmentDate, reason }: { id: number; to: string; appointmentDate: string; reason: string }) => {
+      const res = await fetch(`/api/mis/${id}/notify-unavailable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, appointmentDate, reason }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to send notification (${res.status})`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/mis"] });
+      toast({ title: "Notification sent", description: "The initiating person has been emailed." });
+      setNotifyOpen(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not send", description: error.message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/mis/${id}`, { method: "DELETE" });
@@ -456,6 +484,13 @@ export default function MisPage() {
 
   const handleEdit = (entry: MisEntry) => {
     setEditEntry(entry);
+    // Seed the non-availability notification: recipient from the stored full email
+    // (falls back to the local-part so the user can complete the domain), and any
+    // previously recorded appointment/reason.
+    setNotifyEmail((entry as any).initiatedPersonEmail || entry.initiatedPerson || "");
+    setNotifyApptDate((entry as any).appointmentDate || null);
+    setNotifyReason((entry as any).availabilityNote || "Customer Not Available");
+    setNotifyOpen(false);
     setEditDialogOpen(true);
   };
 
@@ -1514,28 +1549,123 @@ export default function MisPage() {
                   <label className="text-sm font-medium">
                     Status{!user?.isAdmin && <span className="ml-1 text-xs text-slate-500">(admin only)</span>}
                   </label>
-                  <Select
-                    value={editEntry.status || "Pending"}
-                    disabled={!user?.isAdmin}
-                    onValueChange={(value) => {
-                      const updatedEntry = { ...editEntry, status: value };
-                      // Auto-remove from intray when completed or cancelled
-                      if (value === "Completed" || value === "Cancelled") {
-                        updatedEntry.workflowStatus = "completed";
-                      }
-                      setEditEntry(updatedEntry);
-                    }}
-                  >
-                    <SelectTrigger data-testid="select-edit-status">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Pending">Pending</SelectItem>
-                      <SelectItem value="In Progress">In Progress</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                      <SelectItem value="Cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={editEntry.status || "Pending"}
+                      disabled={!user?.isAdmin}
+                      onValueChange={(value) => {
+                        const updatedEntry = { ...editEntry, status: value };
+                        // Auto-remove from intray when completed or cancelled
+                        if (value === "Completed" || value === "Cancelled") {
+                          updatedEntry.workflowStatus = "completed";
+                        }
+                        setEditEntry(updatedEntry);
+                      }}
+                    >
+                      <SelectTrigger className="flex-1" data-testid="select-edit-status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pending">Pending</SelectItem>
+                        <SelectItem value="In Progress">In Progress</SelectItem>
+                        <SelectItem value="Completed">Completed</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {/* Beside Status: notify the initiator the customer is not available. */}
+                    <Popover open={notifyOpen} onOpenChange={setNotifyOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0 whitespace-nowrap text-amber-700 border-amber-300 hover:bg-amber-50"
+                          data-testid="button-notify-unavailable"
+                        >
+                          Customer Not Available
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-4 space-y-3" align="end">
+                        <div className="text-sm font-semibold text-slate-800">Notify Non-Availability</div>
+                        <p className="text-xs text-slate-500 -mt-2">
+                          Emails the initiating person with the new appointment date. The case stays in the intray.
+                        </p>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Reason</label>
+                          <Select value={notifyReason} onValueChange={setNotifyReason}>
+                            <SelectTrigger data-testid="select-notify-reason">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Customer Not Available">Customer Not Available</SelectItem>
+                              <SelectItem value="Customer Requested Reschedule">Customer Requested Reschedule</SelectItem>
+                              <SelectItem value="Premises Locked">Premises Locked</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Appointment Date</label>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full justify-start font-normal"
+                                data-testid="button-notify-appt-date"
+                              >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {notifyApptDate ? formatMisDate(notifyApptDate) : "Select date"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <Calendar
+                                mode="single"
+                                selected={parseMisDate(notifyApptDate) || undefined}
+                                onSelect={(date) => {
+                                  if (date) setNotifyApptDate(dateToStorageFormat(date));
+                                }}
+                                defaultMonth={parseMisDate(notifyApptDate) || new Date()}
+                                captionLayout="dropdown"
+                                startMonth={new Date(2025, 0)}
+                                endMonth={new Date(2035, 11)}
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-600">Send to (initiated person)</label>
+                          <Input
+                            type="email"
+                            value={notifyEmail}
+                            onChange={(e) => setNotifyEmail(e.target.value)}
+                            placeholder="name@company.com"
+                            data-testid="input-notify-email"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          className="w-full"
+                          disabled={
+                            notifyUnavailableMutation.isPending ||
+                            !notifyEmail.trim() ||
+                            !notifyApptDate
+                          }
+                          onClick={() => {
+                            if (!editEntry || !notifyApptDate) return;
+                            notifyUnavailableMutation.mutate({
+                              id: editEntry.id,
+                              to: notifyEmail.trim(),
+                              appointmentDate: formatMisDate(notifyApptDate),
+                              reason: notifyReason,
+                            });
+                          }}
+                          data-testid="button-send-notify"
+                        >
+                          {notifyUnavailableMutation.isPending ? "Sending..." : "Send"}
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
               </div>
             )}

@@ -111,6 +111,7 @@ export async function importGmailWorkAllocations(opts: {
     inDate: entry.receivedDate ?? entry.initiationDate,
     outDate: null,
     initiatedPerson: entry.initiatedPerson,
+    initiatedPersonEmail: entry.initiatedPersonEmail ?? null,
     product: entry.product,
     workNature: entry.workNature ?? null,
     pdPerson: null,
