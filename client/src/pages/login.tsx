@@ -21,12 +21,10 @@ const PRIVILEGED_USERNAMES = new Set(["admin", "vijay"]);
 const quickLoginUsers = [
   { username: "admin", name: "Admin", avatar: "" },
   { username: "vijay", name: "Vijay Togaru", avatar: "" },
-  { username: "bharat", name: "Bharat", avatar: "" },
-  { username: "narender", name: "Narender", avatar: "" },
-  { username: "upender", name: "Upender", avatar: "" },
   { username: "avinash", name: "Avinash", avatar: "" },
   { username: "prashanth", name: "Prashanth", avatar: "" },
   { username: "anosh", name: "Anosh", avatar: "" },
+  { username: "nikhil", name: "Nikhil", avatar: "" },
 ];
 
 export default function LoginPage() {
