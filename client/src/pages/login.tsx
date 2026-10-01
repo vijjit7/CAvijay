@@ -25,6 +25,8 @@ const quickLoginUsers = [
   { username: "prashanth", name: "Prashanth", avatar: "" },
   { username: "anosh", name: "Anosh", avatar: "" },
   { username: "nikhil", name: "Nikhil", avatar: "" },
+  { username: "shankar", name: "Shankar", avatar: "" },
+  { username: "srikanth", name: "Srikanth", avatar: "" },
 ];
 
 export default function LoginPage() {
