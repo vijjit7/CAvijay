@@ -2150,8 +2150,32 @@ showpage
           console.log(`Transcribing audio file: ${audioFile.originalname}, size: ${audioFile.size} bytes, mimetype: ${audioFile.mimetype}`);
           
           const audioBase64 = audioFile.buffer.toString('base64');
-          const mimeType = audioFile.mimetype || 'audio/webm';
-          
+          const mimeType = (audioFile.mimetype || 'audio/webm').toLowerCase();
+
+          // Map the uploaded mime type / extension to the audio format string
+          // OpenRouter expects in an input_audio content part.
+          const audioFormatMap: Record<string, string> = {
+            'audio/mpeg': 'mp3',
+            'audio/mp3': 'mp3',
+            'audio/wav': 'wav',
+            'audio/x-wav': 'wav',
+            'audio/wave': 'wav',
+            'audio/webm': 'webm',
+            'audio/ogg': 'ogg',
+            'audio/opus': 'opus',
+            'audio/mp4': 'm4a',
+            'video/mp4': 'm4a',
+            'audio/x-m4a': 'm4a',
+            'audio/m4a': 'm4a',
+            'audio/aac': 'aac',
+            'audio/flac': 'flac',
+          };
+          const extMatch = (audioFile.originalname || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+          const audioFormat =
+            audioFormatMap[mimeType] ||
+            (extMatch ? extMatch[1] : '') ||
+            'mp3';
+
           const transcriptionResponse = await openai.chat.completions.create({
             model: "google/gemini-2.5-flash",
             messages: [
@@ -2163,11 +2187,12 @@ showpage
                     text: "Please transcribe this audio recording. This is a field verification officer's recording during a visit to verify a loan applicant. Extract all spoken content accurately. Just provide the transcription, no additional commentary."
                   },
                   {
-                    type: "image_url",
-                    image_url: {
-                      url: `data:${mimeType};base64,${audioBase64}`
+                    type: "input_audio",
+                    input_audio: {
+                      data: audioBase64,
+                      format: audioFormat,
                     }
-                  }
+                  } as any
                 ]
               }
             ],
