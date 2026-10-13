@@ -485,7 +485,7 @@ export default function CreateReportPage() {
                 <input
                   ref={audioInputRef}
                   type="file"
-                  accept="audio/*"
+                  accept="audio/*,video/mp4,.mp4,.m4a"
                   className="hidden"
                   onChange={handleAudioUpload}
                   data-testid="input-audio"
