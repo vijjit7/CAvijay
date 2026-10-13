@@ -179,7 +179,14 @@ export default function CreateReportPage() {
   const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!file.type.startsWith("audio/")) {
+      // Browsers (especially on mobile) often report an empty or non-standard
+      // MIME type for recordings (.m4a, .opus, .amr, .3gp, some .wav). Accept by
+      // MIME type when available, otherwise fall back to the file extension.
+      const audioExtensions = /\.(mp3|wav|wave|m4a|aac|ogg|oga|opus|flac|webm|amr|3gp|3gpp|mp4|aiff|wma)$/i;
+      const hasAudioMime = file.type.startsWith("audio/");
+      const hasAudioExt = audioExtensions.test(file.name);
+
+      if (!hasAudioMime && !hasAudioExt) {
         toast({
           title: "Invalid file type",
           description: "Please upload an audio file (MP3, WAV, M4A, etc.)",
