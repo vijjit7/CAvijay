@@ -48,6 +48,7 @@ export default function AssociatesPage() {
     name: '',
     username: '',
     password: '',
+    mobileNumber: '',
     role: VERIFICATION_ASSOCIATE_ROLE,
   });
   const { toast } = useToast();
@@ -95,10 +96,10 @@ export default function AssociatesPage() {
   };
 
   const handleAdd = async () => {
-    if (!newAssociate.name || !newAssociate.username || !newAssociate.password) {
+    if (!newAssociate.name || !newAssociate.username || !newAssociate.password || !newAssociate.mobileNumber.trim()) {
       toast({
         title: "Missing Fields",
-        description: "Please fill in all required fields.",
+        description: "Please fill in all required fields, including the mobile number.",
         variant: "destructive",
       });
       return;
@@ -119,7 +120,7 @@ export default function AssociatesPage() {
           description: `${newAssociate.name} has been added successfully.`,
         });
         setIsAddOpen(false);
-        setNewAssociate({ name: '', username: '', password: '', role: VERIFICATION_ASSOCIATE_ROLE });
+        setNewAssociate({ name: '', username: '', password: '', mobileNumber: '', role: VERIFICATION_ASSOCIATE_ROLE });
         window.location.reload();
       } else {
         const error = await response.json();
@@ -198,6 +199,17 @@ export default function AssociatesPage() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="mobileNumber">Mobile Number</Label>
+                    <Input
+                      id="mobileNumber"
+                      type="tel"
+                      placeholder="e.g. +91 93468 61209"
+                      value={newAssociate.mobileNumber}
+                      onChange={(e) => setNewAssociate(prev => ({ ...prev, mobileNumber: e.target.value }))}
+                      data-testid="input-mobile"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="username">Username</Label>
                     <Input
                       id="username"
@@ -245,6 +257,11 @@ export default function AssociatesPage() {
                     <h3 className="font-semibold" data-testid={`text-name-${associate.id}`}>{associate.name}</h3>
                     <p className="text-sm text-muted-foreground">{associate.role}</p>
                     <p className="text-xs text-muted-foreground">@{associate.username}</p>
+                    {associate.mobileNumber && (
+                      <p className="text-xs text-muted-foreground" data-testid={`text-mobile-${associate.id}`}>
+                        {associate.mobileNumber}
+                      </p>
+                    )}
                   </div>
                 </div>
                 

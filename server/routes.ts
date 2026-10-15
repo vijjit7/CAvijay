@@ -3433,6 +3433,7 @@ showpage
         name: user.name,
         role: user.role,
         avatar: user.avatar,
+        mobileNumber: user.mobileNumber ?? null,
         onLeave: user.onLeave ?? false,
       }));
 
@@ -3723,8 +3724,8 @@ showpage
         return res.status(403).json({ error: "Only admin can create associates" });
       }
       
-      const { username, password, name, role, avatar } = req.body;
-      
+      const { username, password, name, role, avatar, mobileNumber } = req.body;
+
       if (!username || !password || !name) {
         return res.status(400).json({ error: "Username, password, and name are required" });
       }
@@ -3745,17 +3746,19 @@ showpage
         name,
         role: role || 'Verification Officer',
         avatar: avatar || ``,
+        mobileNumber: (typeof mobileNumber === 'string' && mobileNumber.trim()) || null,
       });
-      
+
       console.log(`Created new associate: ${id} (${name})`);
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         associate: {
           id: newUser.id,
           username: newUser.username,
           name: newUser.name,
           role: newUser.role,
           avatar: newUser.avatar,
+          mobileNumber: newUser.mobileNumber,
         }
       });
     } catch (error) {
@@ -4086,12 +4089,22 @@ showpage
       }
 
       const subject = `Customer Not Available - ${entry.leadId}${entry.customerName ? ` (${entry.customerName})` : ""}`;
+
+      // Sign off with the associate handling the case so the initiator knows who to
+      // coordinate with. Prefer the assigned PD person; fall back to whoever is sending.
+      const signer =
+        (entry.pdPersonId ? await storage.getUserById(entry.pdPersonId) : null) ||
+        (await storage.getUserById(userId));
+      const signature = ["Regards"];
+      if (signer?.name) signature.push(signer.name);
+      if (signer?.mobileNumber) signature.push(signer.mobileNumber);
+
       const body = [
         "Dear Sir,",
         "",
         `Respective customer is not available and has given appointment on ${apptDate} and will be completed by that date`,
         "",
-        "Regards",
+        ...signature,
       ].join("\r\n");
 
       await sendMail({ to: recipient, subject, body });

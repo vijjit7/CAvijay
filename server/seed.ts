@@ -40,7 +40,8 @@ const USERS = [
     password: 'password123',
     name: 'Avinash',
     role: 'Verification Officer',
-    avatar: ''
+    avatar: '',
+    mobileNumber: '+91 83098 52194'
   },
   {
     id: 'A5',
@@ -48,7 +49,8 @@ const USERS = [
     password: 'password123',
     name: 'Prashanth',
     role: 'Verification Officer',
-    avatar: ''
+    avatar: '',
+    mobileNumber: '+91 63018 86300'
   }
 ];
 

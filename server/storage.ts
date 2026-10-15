@@ -18,15 +18,15 @@ import { eq, and, sql, desc } from "drizzle-orm";
 
 // Fallback users for local development when database is not available
 const DEFAULT_USERS: User[] = [
-  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '', onLeave: false },
-  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '', onLeave: false },
-  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '', onLeave: false },
-  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '', onLeave: false }
+  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'A3', username: 'upender', password: 'password123', name: 'Upender', role: 'Verification Officer', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'A4', username: 'avinash', password: 'password123', name: 'Avinash', role: 'Verification Officer', avatar: '', mobileNumber: '+91 83098 52194', onLeave: false },
+  { id: 'A5', username: 'prashanth', password: 'password123', name: 'Prashanth', role: 'Verification Officer', avatar: '', mobileNumber: '+91 63018 86300', onLeave: false },
+  { id: 'A6', username: 'anosh', password: 'password123', name: 'Anosh', role: 'Verification Officer', avatar: '', mobileNumber: '+91 93468 61209', onLeave: false },
+  { id: 'A7', username: 'nikhil', password: 'password123', name: 'Nikhil', role: 'Verification Officer', avatar: '', mobileNumber: '+91 97038 00402', onLeave: false }
 ];
 
 // Persist in-memory user changes (e.g. password updates) to disk so they
@@ -43,6 +43,7 @@ function loadDevUserOverrides() {
       if (target) {
         if (typeof o.password === 'string') target.password = o.password;
         if (typeof o.role === 'string') target.role = o.role;
+        if (typeof o.mobileNumber === 'string' || o.mobileNumber === null) target.mobileNumber = o.mobileNumber;
         if (typeof o.onLeave === 'boolean') target.onLeave = o.onLeave;
       } else if (o.id && o.username && o.name) {
         // A dev-created associate that isn't one of the built-in defaults —
@@ -54,6 +55,7 @@ function loadDevUserOverrides() {
           name: o.name,
           role: o.role ?? 'Verification Officer',
           avatar: o.avatar ?? '',
+          mobileNumber: o.mobileNumber ?? null,
           onLeave: o.onLeave ?? false,
         });
       }
@@ -369,6 +371,7 @@ export class PostgresStorage implements IStorage {
         name: u.name,
         role: u.role,
         avatar: u.avatar ?? '',
+        mobileNumber: u.mobileNumber ?? null,
         onLeave: u.onLeave ?? false,
       };
       DEFAULT_USERS.push(created);

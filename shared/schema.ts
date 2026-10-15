@@ -218,6 +218,10 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   role: text("role").notNull(),
   avatar: text("avatar").notNull(),
+  // Associate's contact number. Captured on creation and shown in the signature of
+  // outgoing notifications (e.g. the "Customer Not Available" mail). Nullable so
+  // existing rows created before this field remain valid until backfilled.
+  mobileNumber: text("mobile_number"),
   // When true the associate is on leave: auto-allocation skips them and routes
   // new cases elsewhere (or leaves them for an admin). Toggled from Pincode Mapping.
   onLeave: boolean("on_leave").notNull().default(false),

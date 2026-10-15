@@ -203,8 +203,14 @@ export default function MisDashboardPage() {
     });
     const inProcess = inProcessEntries.length;
     
-    // Build a map from leadId to the most recent report's associateId
-    // This reflects the actual current assignment (updated MIS data) rather than initial allocation
+    // Build a map from leadId to the most recent report's associateId.
+    // NOTE: a report's associateId is frozen at report-creation time and does NOT
+    // follow MIS reallocations. The live owner of a pending case is the MIS entry's
+    // pdPersonId (that is what the MIS page intray and PD Person filter key off, and
+    // what admins change on reallocation). So pdPersonId must win here; the report
+    // associate is only a fallback for entries that have no pdPersonId yet. Keying off
+    // the report first made reallocated cases show under the old associate on the
+    // dashboard while being absent from that associate's MIS view.
     const reportAssociateMap = new Map<string, string>();
     reports.forEach(report => {
       // Later entries in the array overwrite earlier ones, so the latest report assignment wins
@@ -222,8 +228,9 @@ export default function MisDashboardPage() {
       const current = dateWiseData.get(dateKey) || { count: 0, associates: new Map() };
       current.count++;
       
-      // Use report's associateId (actual current worker) if available, else fall back to MIS pdPersonId
-      const associateId = reportAssociateMap.get(entry.leadId) || entry.pdPersonId || "Unassigned";
+      // Use the live MIS allocation (pdPersonId) first so reallocations are honoured;
+      // fall back to a report's associateId only when no PD person is assigned yet.
+      const associateId = entry.pdPersonId || reportAssociateMap.get(entry.leadId) || "Unassigned";
       const associateName = associates.find(a => a.id === associateId)?.name || associateId;
       current.associates.set(associateName, (current.associates.get(associateName) || 0) + 1);
       

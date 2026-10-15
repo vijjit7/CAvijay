@@ -76,6 +76,24 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]';
     -- Per-associate "on leave" flag: when true, auto-allocation skips the associate.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS on_leave boolean NOT NULL DEFAULT false;
+    -- Associate contact number, shown in the signature of outgoing notifications
+    -- (e.g. the "Customer Not Available" mail).
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number text;
+    -- One-time backfill of the current associates' contact numbers. Only fills blanks,
+    -- so it is safe to run on every boot and never clobbers a number an admin has since
+    -- edited. Matches on name (not id) to survive runtime-assigned ids.
+    UPDATE users SET mobile_number = v.num
+    FROM (VALUES
+      ('%anosh%',     '+91 93468 61209'),
+      ('%prashanth%', '+91 63018 86300'),
+      ('%srikanth%',  '+91 99081 69694'),
+      ('%shankar%',   '+91 93922 67959'),
+      ('%nikhil%',    '+91 97038 00402'),
+      ('%mahesh%',    '+91 81790 51377'),
+      ('%anil%',      '+91 99483 19272'),
+      ('%avinash%',   '+91 83098 52194')
+    ) AS v(pat, num)
+    WHERE users.mobile_number IS NULL AND lower(users.name) LIKE v.pat;
     -- Customer non-availability workflow: full initiator email (to notify), the
     -- rescheduled appointment date, and the reason recorded on the MIS entry.
     ALTER TABLE mis_entries ADD COLUMN IF NOT EXISTS initiated_person_email text;
