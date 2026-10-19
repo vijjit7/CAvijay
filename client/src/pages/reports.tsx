@@ -139,8 +139,19 @@ export default function ReportsPage() {
     });
 
     const total = myEntries.length;
-    const completed = myEntries.filter(e => e.outDate && e.outDate.trim() !== "" && e.status !== "Cancelled").length;
     const cancelled = myEntries.filter(e => e.status === "Cancelled").length;
+    // An entry is completed when the MIS status marks it done (e.g. manually
+    // set to "Completed"/"Approved") or an out date exists — not only when a
+    // report was uploaded. This ensures only entries still pending in MIS show
+    // as pending.
+    const completed = myEntries.filter(e =>
+      e.status !== "Cancelled" && (
+        e.status === "Completed" ||
+        e.status === "Approved" ||
+        e.workflowStatus === "completed" ||
+        (e.outDate && e.outDate.trim() !== "")
+      )
+    ).length;
     const pending = total - completed - cancelled;
 
     return { total, completed, pending, cancelled };
