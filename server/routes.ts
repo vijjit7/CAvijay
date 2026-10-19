@@ -244,9 +244,9 @@ function analyzePdfContent(text: string): PdfMetrics {
 
 function extractLeadId(text: string): string | null {
   const patterns = [
-    /Lead\s*Id\s*[:\-]?\s*([A-Za-z0-9]{12})/i,
-    /LeadId\s*[:\-]?\s*([A-Za-z0-9]{12})/i,
-    /Lead\s*ID\s*[:\-]?\s*([A-Za-z0-9]{12})/i,
+    /Lead\s*Id\s*[:\-]?\s*([A-Za-z0-9]{12,16})/i,
+    /LeadId\s*[:\-]?\s*([A-Za-z0-9]{12,16})/i,
+    /Lead\s*ID\s*[:\-]?\s*([A-Za-z0-9]{12,16})/i,
     /Lead\s*Id\s*[:\-]?\s*(BLSA[A-Za-z0-9_\-]+)/i,
     /Lead\s*Id\s*[:\-]?\s*([A-Za-z0-9_\-]+)/i,
     /LeadId\s*[:\-]?\s*([A-Za-z0-9_\-]+)/i,
