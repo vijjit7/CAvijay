@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import AuditLayout from "@/components/layout/audit-layout";
 import { NotificationOptIn } from "@/components/notification-opt-in";
+import { InstallApp } from "@/components/install-app";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -989,9 +990,13 @@ export default function MisPage() {
         {!user?.isAdmin && (
           <div className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2">
             <span className="text-sm text-muted-foreground">
-              Get alerted on this device when new work is allocated to you.
+              Get alerted on this device when new work is allocated to you. Install the app so
+              alerts arrive even when it's closed.
             </span>
-            <NotificationOptIn />
+            <div className="flex shrink-0 items-center gap-2">
+              <InstallApp />
+              <NotificationOptIn />
+            </div>
           </div>
         )}
 
