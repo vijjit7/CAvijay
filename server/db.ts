@@ -145,6 +145,17 @@ export async function ensureSchema(): Promise<void> {
       pincode text NOT NULL,
       created_at timestamp NOT NULL DEFAULT now()
     );
+    -- Web Push subscriptions for the associate PWA. One row per device; a push is
+    -- sent to every row an associate has when new work is auto-allocated to them.
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      associate_id varchar(10) NOT NULL REFERENCES users(id),
+      endpoint text NOT NULL UNIQUE,
+      p256dh text NOT NULL,
+      auth text NOT NULL,
+      user_agent text,
+      created_at timestamp NOT NULL DEFAULT now()
+    );
     -- Migrate deployments created before associate mapping switched from area-name
     -- keywords to 6-digit pincodes. The old location strings can't be matched to
     -- pincodes, so we clear them and let the pincode seed (below) repopulate.
@@ -162,7 +173,7 @@ export async function ensureSchema(): Promise<void> {
   `;
   await pool.query(ddl);
   await seedAssociatePincodes();
-  console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions / associate_locations verified');
+  console.log('[SERVER] ensureSchema: expenses / bank_statements / bank_transactions / associate_locations / push_subscriptions verified');
 }
 
 // Populate the associate ↔ pincode map from the canonical PINCODES sheet the first

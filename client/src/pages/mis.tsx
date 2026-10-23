@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import AuditLayout from "@/components/layout/audit-layout";
+import { NotificationOptIn } from "@/components/notification-opt-in";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -930,6 +931,17 @@ export default function MisPage() {
             </Dialog>
           </div>
         </div>
+
+        {/* Associate notification opt-in — enable Web Push for new-work alerts.
+            Shown regardless of intray contents so associates can opt in proactively. */}
+        {!user?.isAdmin && (
+          <div className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2">
+            <span className="text-sm text-muted-foreground">
+              Get alerted on this device when new work is allocated to you.
+            </span>
+            <NotificationOptIn />
+          </div>
+        )}
 
         {/* Intray Section - Shows entries assigned to current user */}
         {!user?.isAdmin && intrayEntries.length > 0 && (

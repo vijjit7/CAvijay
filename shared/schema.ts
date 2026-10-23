@@ -331,6 +331,33 @@ export const insertAssociateLocationSchema = createInsertSchema(associateLocatio
 export type InsertAssociateLocation = z.infer<typeof insertAssociateLocationSchema>;
 export type AssociateLocation = typeof associateLocations.$inferSelect;
 
+// Web Push subscriptions for the associate PWA. Each row is one browser/device
+// subscription belonging to an associate; when new work is auto-allocated to an
+// associate we fan a push out to every subscription they have. The push endpoint is
+// unique (one per browser push manager), so re-subscribing from the same device
+// upserts the row rather than creating a duplicate. Rows are pruned automatically
+// when the push service reports the subscription gone (HTTP 404/410).
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  associateId: varchar("associate_id", { length: 10 }).notNull().references(() => users.id),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Hand-written rather than derived via createInsertSchema: the inferred insert type
+// is what the push code and storage layer depend on, and we want it explicit.
+export type InsertPushSubscription = {
+  associateId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent?: string | null;
+};
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
 // Archive statistics table - preserves dashboard numbers after reports are archived
 export const archiveStats = pgTable("archive_stats", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),

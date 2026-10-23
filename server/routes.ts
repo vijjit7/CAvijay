@@ -17,6 +17,7 @@ import net from "net";
 import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTestEmail, sendMail } from "./gmail";
 import { importGmailWorkAllocations } from "./mis-auto-import";
 import { resolveAllocation, pickAssociateForPincode, allocationFields } from "./location-allocation";
+import { getVapidPublicKey, isPushConfigured, notifyAssociateNewWork } from "./push";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
 import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
@@ -3847,6 +3848,46 @@ showpage
     }
   });
 
+  // ---- Web Push subscriptions (associate PWA "new work" notifications) ----
+
+  // Public: the browser needs the VAPID public key to create a subscription. Also
+  // reports whether push is configured server-side so the client can hide the UI.
+  app.get("/api/push/vapid-public-key", (_req, res) => {
+    res.json({ publicKey: getVapidPublicKey(), enabled: isPushConfigured() });
+  });
+
+  // Register (or refresh) the logged-in associate's push subscription for this device.
+  app.post("/api/push/subscribe", async (req, res) => {
+    const userId = req.session?.userId;
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { endpoint, keys } = req.body || {};
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: "Invalid subscription payload" });
+    }
+    try {
+      const sub = await storage.upsertPushSubscription({
+        associateId: userId,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        userAgent: req.headers["user-agent"] || null,
+      });
+      res.json({ ok: true, id: sub.id });
+    } catch (err: any) {
+      console.error("Push subscribe error:", err);
+      res.status(500).json({ error: "Failed to save subscription" });
+    }
+  });
+
+  // Remove a subscription (called when the user disables notifications or the browser
+  // rotates the endpoint). No auth needed — knowing the endpoint is sufficient.
+  app.post("/api/push/unsubscribe", async (req, res) => {
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: "endpoint required" });
+    await storage.deletePushSubscription(endpoint).catch(() => {});
+    res.json({ ok: true });
+  });
+
   app.post("/api/mis", async (req, res) => {
     try {
       const entry = req.body;
@@ -3884,6 +3925,12 @@ showpage
 
       try {
         const result = await storage.createMisEntry({ ...entry, ...allocation, sno: nextSno });
+        // Auto-allocated to an associate by pincode → push a "new work" notification.
+        // Fire-and-forget: a notification failure must never fail the MIS write.
+        if (allocation.pdPersonId) {
+          notifyAssociateNewWork(allocation.pdPersonId, [result])
+            .catch((err) => console.error("[Push] notify (single) failed:", err));
+        }
         return res.json(result);
       } catch (dbError: any) {
         console.error("MIS single create: Database error:", dbError);
@@ -3977,13 +4024,18 @@ showpage
       const onLeaveIds = new Set(associatesForAlloc.filter((a) => a.onLeave).map((a) => a.id));
       const activeMappings = locationMappings.filter((m) => !onLeaveIds.has(m.associateId));
 
+      // Track, per inserted row (by position), the associate it was auto-allocated to
+      // via pincode — null when the row was pre-assigned or had no match. Used below to
+      // push a "new work" notification only for genuine auto-allocations.
+      const autoAllocatedTo: (string | null)[] = [];
       const entriesWithSno = uniqueEntries.map((entry: any) => {
-        const alloc = entry.pdPersonId
+        const alloc: { pdPersonId?: string } = entry.pdPersonId
           ? {}
           : allocationFields(
               pickAssociateForPincode(activeMappings, entry.customerAddress),
               nameById,
             );
+        autoAllocatedTo.push(alloc.pdPersonId ?? null);
         return {
           ...entry,
           ...alloc,
@@ -3997,6 +4049,20 @@ showpage
       
       try {
         const result = await storage.createMisEntriesBulk(entriesWithSno);
+        // Group the auto-allocated rows by associate and push one notification each.
+        // `result` preserves insertion order, so it lines up with autoAllocatedTo.
+        const newWorkByAssociate = new Map<string, typeof result>();
+        result.forEach((row, i) => {
+          const associate = autoAllocatedTo[i];
+          if (!associate) return;
+          const bucket = newWorkByAssociate.get(associate);
+          if (bucket) bucket.push(row);
+          else newWorkByAssociate.set(associate, [row]);
+        });
+        newWorkByAssociate.forEach((rows, associate) => {
+          notifyAssociateNewWork(associate, rows)
+            .catch((err) => console.error("[Push] notify (bulk) failed:", err));
+        });
         return res.json({ entries: result, skipped: entries.length - uniqueEntries.length });
       } catch (dbError: any) {
         console.error("MIS bulk: Database insert error:", dbError);

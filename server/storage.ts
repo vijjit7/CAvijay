@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BulkPayment, type BankStatement, type BankTransaction, type AssociateLocation, type InsertAssociateLocation, users, reports, misEntries, archiveStats, expenses, bulkPayments, bankStatements, bankTransactions, associateLocations } from "@shared/schema";
+import { type User, type InsertUser, type Report, type InsertReport, type MisEntry, type InsertMisEntry, type ArchiveStats, type InsertArchiveStats, type Expense, type ExpenseStatus, type ExpensePayment, type BulkPayment, type BankStatement, type BankTransaction, type AssociateLocation, type InsertAssociateLocation, type PushSubscription, type InsertPushSubscription, users, reports, misEntries, archiveStats, expenses, bulkPayments, bankStatements, bankTransactions, associateLocations, pushSubscriptions } from "@shared/schema";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -205,6 +205,10 @@ export interface IStorage {
   getReportByLeadIdAndTitle(leadId: string, title: string): Promise<Report | undefined>;
   // Associate ↔ location mapping (drives auto-allocation of new MIS cases)
   getAssociateLocations(): Promise<AssociateLocation[]>;
+  // Web Push subscriptions (associate PWA notifications)
+  getPushSubscriptionsByAssociate(associateId: string): Promise<PushSubscription[]>;
+  upsertPushSubscription(input: InsertPushSubscription): Promise<PushSubscription>;
+  deletePushSubscription(endpoint: string): Promise<boolean>;
   createAssociateLocation(input: InsertAssociateLocation): Promise<AssociateLocation>;
   updateAssociateLocation(id: number, patch: Partial<InsertAssociateLocation>): Promise<AssociateLocation | undefined>;
   deleteAssociateLocation(id: number): Promise<boolean>;
@@ -321,7 +325,8 @@ const inMemoryBankStatements: BankStatement[] = [];
 const inMemoryBankTransactions: BankTransaction[] = [];
 const inMemoryBulkPayments: BulkPayment[] = [];
 const inMemoryAssociateLocations: AssociateLocation[] = [];
-const memSeq = { expense: 1, bulkPayment: 1, bankStmt: 1, bankTxn: 1, associateLocation: 1 };
+const inMemoryPushSubscriptions: PushSubscription[] = [];
+const memSeq = { expense: 1, bulkPayment: 1, bankStmt: 1, bankTxn: 1, associateLocation: 1, pushSubscription: 1 };
 loadDevState();
 
 export class PostgresStorage implements IStorage {
@@ -798,6 +803,67 @@ export class PostgresStorage implements IStorage {
       return true;
     }
     const result = await this.db.delete(associateLocations).where(eq(associateLocations.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Web Push subscriptions (associate PWA notifications)
+  async getPushSubscriptionsByAssociate(associateId: string): Promise<PushSubscription[]> {
+    if (!this.hasDatabase) {
+      return inMemoryPushSubscriptions.filter(s => s.associateId === associateId);
+    }
+    return await this.db.select().from(pushSubscriptions).where(eq(pushSubscriptions.associateId, associateId));
+  }
+
+  async upsertPushSubscription(input: InsertPushSubscription): Promise<PushSubscription> {
+    if (!this.hasDatabase) {
+      const existing = inMemoryPushSubscriptions.find(s => s.endpoint === input.endpoint);
+      if (existing) {
+        existing.associateId = input.associateId;
+        existing.p256dh = input.p256dh;
+        existing.auth = input.auth;
+        existing.userAgent = input.userAgent ?? null;
+        persist();
+        return existing;
+      }
+      const row: PushSubscription = {
+        id: memSeq.pushSubscription++,
+        associateId: input.associateId,
+        endpoint: input.endpoint,
+        p256dh: input.p256dh,
+        auth: input.auth,
+        userAgent: input.userAgent ?? null,
+        createdAt: new Date(),
+      };
+      inMemoryPushSubscriptions.push(row);
+      persist();
+      return row;
+    }
+    // One endpoint maps to exactly one subscription; re-subscribing from the same
+    // device updates the keys/owner rather than inserting a duplicate.
+    const result = await this.db.insert(pushSubscriptions)
+      .values(input)
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: {
+          associateId: input.associateId,
+          p256dh: input.p256dh,
+          auth: input.auth,
+          userAgent: input.userAgent ?? null,
+        },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async deletePushSubscription(endpoint: string): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const idx = inMemoryPushSubscriptions.findIndex(s => s.endpoint === endpoint);
+      if (idx === -1) return false;
+      inMemoryPushSubscriptions.splice(idx, 1);
+      persist();
+      return true;
+    }
+    const result = await this.db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
     return (result.rowCount ?? 0) > 0;
   }
 

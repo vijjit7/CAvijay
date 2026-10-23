@@ -2,6 +2,7 @@ import { importWorkAllocationEmails } from "./gmail";
 import { isGmailOAuthConfigured } from "./gmail-oauth";
 import { storage } from "./storage";
 import { pickAssociateForPincode, allocationFields } from "./location-allocation";
+import { notifyAssociateNewWork } from "./push";
 
 // Default owner for auto-imported work. Entries land under ADMIN with the schema
 // default workflowStatus 'unassigned', so they appear in the in-tray for an admin
@@ -173,17 +174,38 @@ export async function importGmailWorkAllocations(opts: {
   const activeMappings = locationMappings.filter((m) => !onLeave.has(m.associateId));
 
   let nextSno = await storage.getNextMisSno();
-  const entriesWithSno = uniqueRows.map((row) => ({
-    ...row,
-    ...allocationFields(
+  // Track which associate (if any) each row was auto-allocated to by pincode, aligned
+  // by position with the inserted rows, so we can push a "new work" notification.
+  const autoAllocatedTo: (string | null)[] = [];
+  const entriesWithSno = uniqueRows.map((row) => {
+    const alloc = allocationFields(
       pickAssociateForPincode(activeMappings, row.customerAddress),
       nameById,
-    ),
-    associateId: ownerId,
-    sno: nextSno++,
-  }));
+    );
+    autoAllocatedTo.push(alloc.pdPersonId ?? null);
+    return {
+      ...row,
+      ...alloc,
+      associateId: ownerId,
+      sno: nextSno++,
+    };
+  });
 
   const inserted = await storage.createMisEntriesBulk(entriesWithSno);
+
+  // Notify each associate about the new work auto-allocated to them.
+  const newWorkByAssociate = new Map<string, typeof inserted>();
+  inserted.forEach((row, i) => {
+    const associate = autoAllocatedTo[i];
+    if (!associate) return;
+    const bucket = newWorkByAssociate.get(associate);
+    if (bucket) bucket.push(row);
+    else newWorkByAssociate.set(associate, [row]);
+  });
+  newWorkByAssociate.forEach((rows, associate) => {
+    notifyAssociateNewWork(associate, rows)
+      .catch((err) => console.error("[Push] notify (gmail import) failed:", err));
+  });
 
   return {
     added: inserted.length,
