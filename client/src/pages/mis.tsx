@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Upload, Trash2, Edit, ClipboardPaste, Inbox, ChevronDown, CalendarIcon } from "lucide-react";
+import { Plus, Upload, Trash2, Edit, ClipboardPaste, Inbox, ChevronDown, CalendarIcon, BellRing } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -371,6 +371,36 @@ export default function MisPage() {
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Admin: manually push the "new work" notification for a case to the allocated
+  // associate's phone(s). Reports back how many devices it reached.
+  const sendPushMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/mis/${id}/send-push`, { method: "POST" });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to send notification (${res.status})`);
+      }
+      return res.json() as Promise<{ associateName: string; devices: number; sent: number }>;
+    },
+    onSuccess: (data) => {
+      if (data.devices === 0) {
+        toast({
+          title: "No subscribed devices",
+          description: `${data.associateName} hasn't enabled notifications on any device.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Notification sent",
+          description: `Sent to ${data.sent} of ${data.devices} device(s) for ${data.associateName}.`,
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not send", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1342,6 +1372,19 @@ export default function MisPage() {
                         <TableCell className="text-xs px-2">{getStatusBadge(entry.status)}</TableCell>
                         <TableCell className="px-2">
                           <div className="flex items-center gap-1">
+                            {user?.isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                disabled={!entry.pdPersonId || (sendPushMutation.isPending && sendPushMutation.variables === entry.id)}
+                                title={entry.pdPersonId ? "Send phone notification to the allocated associate" : "Not allocated to an associate yet"}
+                                onClick={() => sendPushMutation.mutate(entry.id)}
+                                data-testid={`button-send-push-${entry.id}`}
+                              >
+                                <BellRing className="h-3 w-3 text-blue-600" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"

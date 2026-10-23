@@ -4270,6 +4270,46 @@ showpage
     }
   });
 
+  // Admin: manually fire the "new work" push for a single case to the allocated
+  // associate's devices. Useful for testing the PWA and for re-alerting an associate.
+  app.post("/api/mis/:id/send-push", async (req, res) => {
+    try {
+      if (req.session?.userId !== "ADMIN") {
+        return res.status(403).json({ error: "Admin only" });
+      }
+      if (!isPushConfigured()) {
+        return res.status(400).json({ error: "Push notifications are not configured on the server" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID provided" });
+
+      const entries = await storage.getMisEntries();
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return res.status(404).json({ error: "MIS entry not found" });
+
+      // The allocated associate is the PD person (what auto-allocation notifies), not
+      // the owner (associateId, typically ADMIN for imported work).
+      const target = entry.pdPersonId;
+      if (!target) {
+        return res.status(400).json({ error: "This case isn't allocated to an associate yet" });
+      }
+
+      const associate = await storage.getUserById(target);
+      const result = await notifyAssociateNewWork(target, [entry]);
+
+      return res.json({
+        ok: true,
+        associateName: associate?.name ?? target,
+        devices: result.devices,
+        sent: result.sent,
+      });
+    } catch (error: any) {
+      console.error("MIS send-push error:", error);
+      return res.status(500).json({ error: error.message || "Failed to send notification" });
+    }
+  });
+
   app.delete("/api/mis/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

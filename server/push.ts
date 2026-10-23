@@ -42,23 +42,31 @@ export function getVapidPublicKey(): string {
   return publicKey;
 }
 
+// Outcome of a notify attempt, so callers that want to report back (e.g. a manual
+// "send notification" from the admin console) can tell the user what happened.
+export type NotifyResult = { devices: number; sent: number; pruned: number };
+
 /**
  * Notify an associate that new work has landed in their intray. Fans the push out to
  * all of the associate's device subscriptions and prunes any the push service reports
  * as gone (HTTP 404/410). Never throws — failures are logged, not propagated, so a
  * notification problem can't break the MIS write that triggered it.
+ *
+ * Returns how many devices were targeted, how many sends succeeded, and how many dead
+ * subscriptions were pruned.
  */
-export async function notifyAssociateNewWork(associateId: string, entries: MisEntry[]): Promise<void> {
-  if (!configured || entries.length === 0) return;
+export async function notifyAssociateNewWork(associateId: string, entries: MisEntry[]): Promise<NotifyResult> {
+  const empty: NotifyResult = { devices: 0, sent: 0, pruned: 0 };
+  if (!configured || entries.length === 0) return empty;
 
   let subs: PushSubscription[];
   try {
     subs = await storage.getPushSubscriptionsByAssociate(associateId);
   } catch (err) {
     console.error("[Push] Failed to load subscriptions:", err);
-    return;
+    return empty;
   }
-  if (subs.length === 0) return;
+  if (subs.length === 0) return empty;
 
   const count = entries.length;
   const first = entries[0];
@@ -97,8 +105,8 @@ export async function notifyAssociateNewWork(associateId: string, entries: MisEn
     return lines.join("\n");
   }
 
-  await Promise.all(
-    subs.map(async (sub) => {
+  const results = await Promise.all(
+    subs.map(async (sub): Promise<{ sent: boolean; pruned: boolean }> => {
       const payload = JSON.stringify({
         title,
         body: bodyFor(sub),
@@ -110,15 +118,23 @@ export async function notifyAssociateNewWork(associateId: string, entries: MisEn
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           payload,
         );
+        return { sent: true, pruned: false };
       } catch (err: any) {
         const status = err?.statusCode;
         if (status === 404 || status === 410) {
           // Subscription expired or the user unsubscribed — drop it.
           await storage.deletePushSubscription(sub.endpoint).catch(() => {});
-        } else {
-          console.error("[Push] sendNotification failed:", status, err?.body || err?.message || err);
+          return { sent: false, pruned: true };
         }
+        console.error("[Push] sendNotification failed:", status, err?.body || err?.message || err);
+        return { sent: false, pruned: false };
       }
     }),
   );
+
+  return {
+    devices: subs.length,
+    sent: results.filter((r) => r.sent).length,
+    pruned: results.filter((r) => r.pruned).length,
+  };
 }
