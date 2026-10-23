@@ -209,6 +209,7 @@ export interface IStorage {
   getPushSubscriptionsByAssociate(associateId: string): Promise<PushSubscription[]>;
   upsertPushSubscription(input: InsertPushSubscription): Promise<PushSubscription>;
   deletePushSubscription(endpoint: string): Promise<boolean>;
+  updatePushSubscriptionLocation(endpoint: string, lat: number, lng: number): Promise<boolean>;
   createAssociateLocation(input: InsertAssociateLocation): Promise<AssociateLocation>;
   updateAssociateLocation(id: number, patch: Partial<InsertAssociateLocation>): Promise<AssociateLocation | undefined>;
   deleteAssociateLocation(id: number): Promise<boolean>;
@@ -832,6 +833,9 @@ export class PostgresStorage implements IStorage {
         p256dh: input.p256dh,
         auth: input.auth,
         userAgent: input.userAgent ?? null,
+        lastLat: null,
+        lastLng: null,
+        locationUpdatedAt: null,
         createdAt: new Date(),
       };
       inMemoryPushSubscriptions.push(row);
@@ -864,6 +868,24 @@ export class PostgresStorage implements IStorage {
       return true;
     }
     const result = await this.db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Record a device's last-known location (reported by the PWA) so a "new work" push
+  // can include an approximate distance from the device to the allocated case.
+  async updatePushSubscriptionLocation(endpoint: string, lat: number, lng: number): Promise<boolean> {
+    if (!this.hasDatabase) {
+      const sub = inMemoryPushSubscriptions.find(s => s.endpoint === endpoint);
+      if (!sub) return false;
+      sub.lastLat = String(lat);
+      sub.lastLng = String(lng);
+      sub.locationUpdatedAt = new Date();
+      persist();
+      return true;
+    }
+    const result = await this.db.update(pushSubscriptions)
+      .set({ lastLat: String(lat), lastLng: String(lng), locationUpdatedAt: new Date() })
+      .where(eq(pushSubscriptions.endpoint, endpoint));
     return (result.rowCount ?? 0) > 0;
   }
 

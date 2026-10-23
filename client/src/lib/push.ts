@@ -100,11 +100,74 @@ export async function subscribeToPush(): Promise<{ ok: boolean; error?: string }
       body: JSON.stringify({ endpoint: sub.endpoint, keys: json.keys }),
     });
     if (!res.ok) return { ok: false, error: "Failed to save subscription on the server." };
+    // Opt-in is a natural moment to ask for location and seed the device's position,
+    // so the first new-work push can already show a distance. Best-effort — if the
+    // associate declines geolocation, notifications still work, just without distance.
+    void reportLocationOnce();
     return { ok: true };
   } catch (err: any) {
     console.error("[Push] subscribe failed:", err);
     return { ok: false, error: err?.message || "Could not enable notifications." };
   }
+}
+
+// Read the device's current location and send it to the server, tagged with this
+// device's push endpoint, so new-work notifications can include a "~X km away" hint.
+// Resolves quietly to false on any failure (no subscription, permission denied,
+// geolocation unavailable) — this is an enhancement, never a blocking step.
+export async function reportLocationOnce(): Promise<boolean> {
+  if (!isPushSupported() || typeof navigator === "undefined" || !navigator.geolocation) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return false;
+
+    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 5 * 60_000, // a position up to 5 min old is fine for a distance hint
+      });
+    });
+
+    const res = await fetch("/api/push/location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Keep the device's reported location reasonably fresh while the PWA is open, so a
+// push that arrives later reflects where the associate actually is. Reports once now
+// and then on an interval. Only runs when a subscription exists AND location
+// permission is already granted — it never triggers a permission prompt on its own
+// (opt-in / subscribeToPush handles the initial ask). Returns a stop() function.
+export async function startLocationReporting(intervalMs = 10 * 60_000): Promise<() => void> {
+  const noop = () => {};
+  if (!isPushSupported()) return noop;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (!(await reg.pushManager.getSubscription())) return noop;
+    // Don't surprise the user with a prompt; only auto-report once already granted.
+    if (navigator.permissions?.query) {
+      const status = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+      if (status.state !== "granted") return noop;
+    }
+  } catch {
+    return noop;
+  }
+  void reportLocationOnce();
+  const id = setInterval(() => void reportLocationOnce(), intervalMs);
+  return () => clearInterval(id);
 }
 
 // Unsubscribe this device and tell the server to drop the row.

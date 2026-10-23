@@ -154,8 +154,16 @@ export async function ensureSchema(): Promise<void> {
       p256dh text NOT NULL,
       auth text NOT NULL,
       user_agent text,
+      last_lat text,
+      last_lng text,
+      location_updated_at timestamp,
       created_at timestamp NOT NULL DEFAULT now()
     );
+    -- Add the device-location columns to deployments whose push_subscriptions table
+    -- predates the "distance to allocated case" feature.
+    ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS last_lat text;
+    ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS last_lng text;
+    ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS location_updated_at timestamp;
     -- Migrate deployments created before associate mapping switched from area-name
     -- keywords to 6-digit pincodes. The old location strings can't be matched to
     -- pincodes, so we clear them and let the pincode seed (below) repopulate.

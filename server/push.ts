@@ -13,7 +13,8 @@
 
 import webpush from "web-push";
 import { storage } from "./storage";
-import type { MisEntry } from "@shared/schema";
+import { geocodeAddress, haversineKm, formatDistance, type LatLng } from "./geocode";
+import type { MisEntry, PushSubscription } from "@shared/schema";
 
 const publicKey = process.env.VAPID_PUBLIC_KEY || "";
 const privateKey = process.env.VAPID_PRIVATE_KEY || "";
@@ -50,7 +51,7 @@ export function getVapidPublicKey(): string {
 export async function notifyAssociateNewWork(associateId: string, entries: MisEntry[]): Promise<void> {
   if (!configured || entries.length === 0) return;
 
-  let subs;
+  let subs: PushSubscription[];
   try {
     subs = await storage.getPushSubscriptionsByAssociate(associateId);
   } catch (err) {
@@ -62,22 +63,48 @@ export async function notifyAssociateNewWork(associateId: string, entries: MisEn
   const count = entries.length;
   const first = entries[0];
   const title = count === 1 ? "New work allocated" : `${count} new cases allocated`;
-  const body =
+
+  // Lead line: who/what the case is. For a single case we also show the address and,
+  // per device, the distance from that device's last-known location to the address.
+  const headline =
     count === 1
       ? [first.customerName, first.leadId ? `Lead ${first.leadId}` : null]
           .filter(Boolean)
           .join(" · ")
       : `${count} new cases are in your intray`;
 
-  const payload = JSON.stringify({
-    title,
-    body,
-    url: "/mis",
-    tag: "mis-new-work",
-  });
+  // Geocode the (single) case address once; distance is then computed per device from
+  // each subscription's last-known location. null = unconfigured/unresolvable → no
+  // distance line, just the address.
+  const address = count === 1 ? (first.customerAddress || "").trim() : "";
+  const caseLoc: LatLng | null = address ? await geocodeAddress(address) : null;
+
+  // Build this device's notification body: headline, then (for a single case) the
+  // address and a "~X km away" line when we have both the case coords and the device's
+  // last-known location.
+  function bodyFor(sub: (typeof subs)[number]): string {
+    const lines = [headline];
+    if (count === 1 && address) {
+      lines.push(address);
+      if (caseLoc && sub.lastLat && sub.lastLng) {
+        const lat = parseFloat(sub.lastLat);
+        const lng = parseFloat(sub.lastLng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          lines.push(`📍 ${formatDistance(haversineKm({ lat, lng }, caseLoc))}`);
+        }
+      }
+    }
+    return lines.join("\n");
+  }
 
   await Promise.all(
     subs.map(async (sub) => {
+      const payload = JSON.stringify({
+        title,
+        body: bodyFor(sub),
+        url: "/mis",
+        tag: "mis-new-work",
+      });
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },

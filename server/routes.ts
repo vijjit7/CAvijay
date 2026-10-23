@@ -3888,6 +3888,31 @@ showpage
     res.json({ ok: true });
   });
 
+  // Report this device's last-known location so new-work pushes can include an
+  // approximate distance to the allocated case's address. The PWA calls this while
+  // open; it's best-effort, so a missing/stale location just omits the distance line.
+  app.post("/api/push/location", async (req, res) => {
+    const userId = req.session?.userId;
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { endpoint, lat, lng } = req.body || {};
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (
+      !endpoint ||
+      !Number.isFinite(latNum) || latNum < -90 || latNum > 90 ||
+      !Number.isFinite(lngNum) || lngNum < -180 || lngNum > 180
+    ) {
+      return res.status(400).json({ error: "Invalid location payload" });
+    }
+    try {
+      const updated = await storage.updatePushSubscriptionLocation(endpoint, latNum, lngNum);
+      res.json({ ok: updated });
+    } catch (err: any) {
+      console.error("Push location error:", err);
+      res.status(500).json({ error: "Failed to save location" });
+    }
+  });
+
   app.post("/api/mis", async (req, res) => {
     try {
       const entry = req.body;
