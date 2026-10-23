@@ -383,7 +383,18 @@ export default function MisPage() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to send notification (${res.status})`);
       }
-      return res.json() as Promise<{ associateName: string; devices: number; sent: number }>;
+      return res.json() as Promise<{
+        associateName: string;
+        devices: number;
+        sent: number;
+        distance?: {
+          geocodingConfigured: boolean;
+          hasAddress: boolean;
+          caseGeocoded: boolean;
+          devicesWithLocation: number;
+          shown: boolean;
+        };
+      }>;
     },
     onSuccess: (data) => {
       if (data.devices === 0) {
@@ -392,12 +403,23 @@ export default function MisPage() {
           description: `${data.associateName} hasn't enabled notifications on any device.`,
           variant: "destructive",
         });
-      } else {
-        toast({
-          title: "Notification sent",
-          description: `Sent to ${data.sent} of ${data.devices} device(s) for ${data.associateName}.`,
-        });
+        return;
       }
+
+      // Explain a missing "~X km away" line so testing points at the exact gap.
+      let distanceNote = "";
+      const d = data.distance;
+      if (d && !d.shown) {
+        if (!d.hasAddress) distanceNote = " No distance: this case has no address.";
+        else if (!d.geocodingConfigured) distanceNote = " No distance: geocoding isn't configured (GOOGLE_MAPS_API_KEY).";
+        else if (!d.caseGeocoded) distanceNote = " No distance: the case address couldn't be geocoded.";
+        else if (d.devicesWithLocation === 0) distanceNote = " No distance: the associate's device hasn't shared its location yet.";
+      }
+
+      toast({
+        title: "Notification sent",
+        description: `Sent to ${data.sent} of ${data.devices} device(s) for ${data.associateName}.${distanceNote}`,
+      });
     },
     onError: (error: any) => {
       toast({ title: "Could not send", description: error.message, variant: "destructive" });

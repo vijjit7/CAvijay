@@ -18,6 +18,7 @@ import { searchTriggerEmail, calculateTATMetrics, formatInitiationTime, sendTest
 import { importGmailWorkAllocations } from "./mis-auto-import";
 import { resolveAllocation, pickAssociateForPincode, allocationFields } from "./location-allocation";
 import { getVapidPublicKey, isPushConfigured, notifyAssociateNewWork } from "./push";
+import { isGeocodingConfigured, geocodeAddress } from "./geocode";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
 import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
@@ -4296,6 +4297,17 @@ showpage
       }
 
       const associate = await storage.getUserById(target);
+
+      // Diagnose the distance line up front so a manual test can report exactly why
+      // "~X km away" is absent: geocoding unconfigured, address blank/unresolvable, or
+      // no device has reported a location. (The push itself computes the same thing.)
+      const subs = await storage.getPushSubscriptionsByAssociate(target);
+      const devicesWithLocation = subs.filter((s) => s.lastLat && s.lastLng).length;
+      const geocodingConfigured = isGeocodingConfigured();
+      const address = (entry.customerAddress || "").trim();
+      const caseLoc = geocodingConfigured && address ? await geocodeAddress(address) : null;
+      const distanceShown = !!caseLoc && devicesWithLocation > 0;
+
       const result = await notifyAssociateNewWork(target, [entry]);
 
       return res.json({
@@ -4303,6 +4315,13 @@ showpage
         associateName: associate?.name ?? target,
         devices: result.devices,
         sent: result.sent,
+        distance: {
+          geocodingConfigured,
+          hasAddress: !!address,
+          caseGeocoded: !!caseLoc,
+          devicesWithLocation,
+          shown: distanceShown,
+        },
       });
     } catch (error: any) {
       console.error("MIS send-push error:", error);
