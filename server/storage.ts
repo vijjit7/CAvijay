@@ -207,6 +207,8 @@ export interface IStorage {
   getAssociateLocations(): Promise<AssociateLocation[]>;
   // Web Push subscriptions (associate PWA notifications)
   getPushSubscriptionsByAssociate(associateId: string): Promise<PushSubscription[]>;
+  getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | undefined>;
+  getAllPushSubscriptions(): Promise<PushSubscription[]>;
   upsertPushSubscription(input: InsertPushSubscription): Promise<PushSubscription>;
   deletePushSubscription(endpoint: string): Promise<boolean>;
   updatePushSubscriptionLocation(endpoint: string, lat: number, lng: number): Promise<boolean>;
@@ -813,6 +815,21 @@ export class PostgresStorage implements IStorage {
       return inMemoryPushSubscriptions.filter(s => s.associateId === associateId);
     }
     return await this.db.select().from(pushSubscriptions).where(eq(pushSubscriptions.associateId, associateId));
+  }
+
+  async getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | undefined> {
+    if (!this.hasDatabase) {
+      return inMemoryPushSubscriptions.find(s => s.endpoint === endpoint);
+    }
+    const result = await this.db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)).limit(1);
+    return result[0];
+  }
+
+  async getAllPushSubscriptions(): Promise<PushSubscription[]> {
+    if (!this.hasDatabase) {
+      return [...inMemoryPushSubscriptions];
+    }
+    return await this.db.select().from(pushSubscriptions);
   }
 
   async upsertPushSubscription(input: InsertPushSubscription): Promise<PushSubscription> {

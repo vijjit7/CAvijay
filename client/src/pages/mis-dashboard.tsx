@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import AuditLayout from "@/components/layout/audit-layout";
+import { PushSubscriptionsSummary } from "@/components/push-subscriptions-summary";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -597,6 +598,7 @@ export default function MisDashboardPage() {
           <h1 className="text-2xl font-bold text-slate-900">MIS Dashboard</h1>
           <p className="text-slate-500">Management Information System Analytics</p>
         </div>
+        <PushSubscriptionsSummary />
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

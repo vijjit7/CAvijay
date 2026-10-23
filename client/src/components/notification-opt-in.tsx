@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
   getPushState,
+  getSubscribedAssociate,
   subscribeToPush,
   unsubscribeFromPush,
   type PushState,
@@ -18,10 +19,23 @@ export function NotificationOptIn() {
   const { toast } = useToast();
   const [state, setState] = useState<PushState | null>(null);
   const [busy, setBusy] = useState(false);
+  // Name of the associate THIS device's subscription is registered to on the server.
+  // May differ from the logged-in user if the phone was subscribed under another
+  // account and never re-enabled — surfacing it removes that ambiguity.
+  const [subscribedAs, setSubscribedAs] = useState<string | null>(null);
 
   useEffect(() => {
     getPushState().then(setState);
   }, []);
+
+  // Once we know the device is subscribed, resolve which account it's alerting for.
+  useEffect(() => {
+    if (state !== "subscribed") {
+      setSubscribedAs(null);
+      return;
+    }
+    getSubscribedAssociate().then((info) => setSubscribedAs(info?.associateName ?? null));
+  }, [state]);
 
   // Hide entirely when the feature can't work here (unsupported browser or no
   // server-side VAPID keys) — nothing actionable for the user.
@@ -59,10 +73,17 @@ export function NotificationOptIn() {
 
   if (state === "subscribed") {
     return (
-      <Button variant="outline" size="sm" onClick={disable} disabled={busy} data-testid="button-disable-notifications">
-        <BellRing className="h-4 w-4 mr-2" />
-        Notifications on
-      </Button>
+      <div className="flex flex-col items-end gap-1">
+        <Button variant="outline" size="sm" onClick={disable} disabled={busy} data-testid="button-disable-notifications">
+          <BellRing className="h-4 w-4 mr-2" />
+          Notifications on
+        </Button>
+        {subscribedAs && (
+          <span className="text-xs text-muted-foreground" data-testid="text-subscribed-as">
+            This device alerts: {subscribedAs}
+          </span>
+        )}
+      </div>
     );
   }
 

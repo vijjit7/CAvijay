@@ -67,6 +67,27 @@ export async function getPushState(): Promise<PushState> {
   return Notification.permission === "granted" ? "default" : "default";
 }
 
+// Ask the server which associate this device's subscription is registered to, so the
+// opt-in UI can show "this device alerts: <name>". Returns null when there's no local
+// subscription or the server has no record of this device's endpoint.
+export async function getSubscribedAssociate(): Promise<{ associateId: string; associateName: string | null } | null> {
+  if (!isPushSupported()) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return null;
+    const res = await fetch(`/api/push/subscription?endpoint=${encodeURIComponent(sub.endpoint)}`, {
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.associateId) return null;
+    return { associateId: data.associateId, associateName: data.associateName ?? null };
+  } catch {
+    return null;
+  }
+}
+
 // Ask for permission, subscribe, and persist the subscription server-side.
 export async function subscribeToPush(): Promise<{ ok: boolean; error?: string }> {
   if (!isPushSupported()) {

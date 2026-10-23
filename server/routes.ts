@@ -3913,6 +3913,61 @@ showpage
     }
   });
 
+  // Report which associate THIS device's subscription is registered to on the server.
+  // The PWA passes its own push endpoint; we return the associate the endpoint is
+  // actually bound to (which can differ from the logged-in user if the device was
+  // subscribed under another account and never re-enabled). Lets the opt-in UI show an
+  // unambiguous "this device alerts: <name>" label. Requires auth.
+  app.get("/api/push/subscription", async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Not authenticated" });
+    const endpoint = typeof req.query.endpoint === "string" ? req.query.endpoint : "";
+    if (!endpoint) return res.status(400).json({ error: "endpoint required" });
+    try {
+      const sub = await storage.getPushSubscriptionByEndpoint(endpoint);
+      if (!sub) return res.json({ associateId: null, associateName: null });
+      const associate = await storage.getUserById(sub.associateId);
+      res.json({ associateId: sub.associateId, associateName: associate?.name ?? null });
+    } catch (err: any) {
+      console.error("Push subscription lookup error:", err);
+      res.status(500).json({ error: "Failed to look up subscription" });
+    }
+  });
+
+  // Admin: which associates have active push subscriptions, and how many devices each.
+  app.get("/api/push/subscriptions/summary", async (req, res) => {
+    if (req.session?.userId !== "ADMIN") {
+      return res.status(403).json({ error: "Admin only" });
+    }
+    try {
+      const [subs, associates] = await Promise.all([
+        storage.getAllPushSubscriptions(),
+        storage.getAssociates(),
+      ]);
+      const nameById = new Map(associates.map((a) => [a.id, a.name]));
+      const byAssociate = new Map<string, { deviceCount: number; lastSubscribedAt: Date | null }>();
+      for (const sub of subs) {
+        const current = byAssociate.get(sub.associateId) ?? { deviceCount: 0, lastSubscribedAt: null };
+        current.deviceCount += 1;
+        if (sub.createdAt && (!current.lastSubscribedAt || sub.createdAt > current.lastSubscribedAt)) {
+          current.lastSubscribedAt = sub.createdAt;
+        }
+        byAssociate.set(sub.associateId, current);
+      }
+      const summary = Array.from(byAssociate.entries())
+        .map(([associateId, info]) => ({
+          associateId,
+          associateName: nameById.get(associateId) ?? associateId,
+          deviceCount: info.deviceCount,
+          lastSubscribedAt: info.lastSubscribedAt,
+        }))
+        .sort((a, b) => a.associateName.localeCompare(b.associateName));
+      res.json(summary);
+    } catch (err: any) {
+      console.error("Push subscriptions summary error:", err);
+      res.status(500).json({ error: "Failed to load subscriptions summary" });
+    }
+  });
+
   app.post("/api/mis", async (req, res) => {
     try {
       const entry = req.body;
