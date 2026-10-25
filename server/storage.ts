@@ -840,6 +840,7 @@ export class PostgresStorage implements IStorage {
         existing.p256dh = input.p256dh;
         existing.auth = input.auth;
         existing.userAgent = input.userAgent ?? null;
+        existing.platform = input.platform ?? "web";
         persist();
         return existing;
       }
@@ -850,6 +851,7 @@ export class PostgresStorage implements IStorage {
         p256dh: input.p256dh,
         auth: input.auth,
         userAgent: input.userAgent ?? null,
+        platform: input.platform ?? "web",
         lastLat: null,
         lastLng: null,
         locationUpdatedAt: null,
@@ -862,7 +864,7 @@ export class PostgresStorage implements IStorage {
     // One endpoint maps to exactly one subscription; re-subscribing from the same
     // device updates the keys/owner rather than inserting a duplicate.
     const result = await this.db.insert(pushSubscriptions)
-      .values(input)
+      .values({ ...input, platform: input.platform ?? "web" })
       .onConflictDoUpdate({
         target: pushSubscriptions.endpoint,
         set: {
@@ -870,6 +872,7 @@ export class PostgresStorage implements IStorage {
           p256dh: input.p256dh,
           auth: input.auth,
           userAgent: input.userAgent ?? null,
+          platform: input.platform ?? "web",
         },
       })
       .returning();

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "625206391168",
+    "project_id": "auditguard-98d28",
+    "storage_bucket": "auditguard-98d28.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:625206391168:android:6d2cb3168c8ea5b235d165",
+        "android_client_info": {
+          "package_name": "app.auditguard.associate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBy7UnGUylZVmjSlP9q3uSpC01hxENM_QM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

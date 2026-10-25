@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>AuditGuard</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      .wrap { padding: 24px; }
+      .spin {
+        width: 36px; height: 36px; margin: 0 auto 16px;
+        border: 3px solid rgba(255,255,255,.2);
+        border-top-color: #fff; border-radius: 50%;
+        animation: s 0.9s linear infinite;
+      }
+      @keyframes s { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <!-- Shown only briefly while the native shell loads the live site (server.url),
+         or if the device is offline and the live site can't be reached. -->
+    <div class="wrap">
+      <div class="spin"></div>
+      <div>Loading AuditGuard…</div>
+    </div>
+  </body>
+</html>

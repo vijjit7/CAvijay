@@ -14,6 +14,7 @@
 import webpush from "web-push";
 import { storage } from "./storage";
 import { geocodeAddress, haversineKm, formatDistance, type LatLng } from "./geocode";
+import { sendNewWorkMessage } from "./fcm";
 import type { MisEntry, PushSubscription } from "@shared/schema";
 
 const publicKey = process.env.VAPID_PUBLIC_KEY || "";
@@ -57,7 +58,9 @@ export type NotifyResult = { devices: number; sent: number; pruned: number };
  */
 export async function notifyAssociateNewWork(associateId: string, entries: MisEntry[]): Promise<NotifyResult> {
   const empty: NotifyResult = { devices: 0, sent: 0, pruned: 0 };
-  if (!configured || entries.length === 0) return empty;
+  // Proceed if EITHER transport might work — Web Push (VAPID) for PWA rows and/or FCM
+  // for native rows. Each sub is dispatched per its platform below.
+  if (entries.length === 0) return empty;
 
   let subs: PushSubscription[];
   try {
@@ -107,9 +110,23 @@ export async function notifyAssociateNewWork(associateId: string, entries: MisEn
 
   const results = await Promise.all(
     subs.map(async (sub): Promise<{ sent: boolean; pruned: boolean }> => {
+      const body = bodyFor(sub);
+
+      // Native Android device → FCM data message (drives the full-screen alarm).
+      if (sub.platform === "android") {
+        const { sent, invalidToken } = await sendNewWorkMessage(sub.endpoint, { title, body });
+        if (invalidToken) {
+          await storage.deletePushSubscription(sub.endpoint).catch(() => {});
+          return { sent: false, pruned: true };
+        }
+        return { sent, pruned: false };
+      }
+
+      // Browser / PWA → Web Push (VAPID). Skipped if VAPID isn't configured.
+      if (!configured) return { sent: false, pruned: false };
       const payload = JSON.stringify({
         title,
-        body: bodyFor(sub),
+        body,
         url: "/mis",
         tag: "mis-new-work",
       });

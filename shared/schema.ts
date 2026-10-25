@@ -344,6 +344,10 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
   userAgent: text("user_agent"),
+  // "web" = browser/PWA Web Push (VAPID); "android" = native app FCM token. Determines
+  // which transport the push code uses; "endpoint" holds the FCM registration token for
+  // android rows (and p256dh/auth are empty).
+  platform: text("platform").default("web").notNull(),
   // Device's last-known location, reported periodically by the PWA while open. Used to
   // put an approximate "~X km away" distance to the allocated case's address in the
   // push notification. Stored as text to avoid float-precision concerns; nullable until
@@ -362,6 +366,7 @@ export type InsertPushSubscription = {
   p256dh: string;
   auth: string;
   userAgent?: string | null;
+  platform?: "web" | "android";
 };
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 

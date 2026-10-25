@@ -3880,6 +3880,33 @@ showpage
     }
   });
 
+  // Register (or refresh) a native Android app's FCM token. Called by the Capacitor
+  // shell on launch/resume; the session cookie it sends identifies the associate. The
+  // token is stored in the same push_subscriptions table with platform='android', so
+  // the shared new-work fan-out (and distance logic) covers native devices too.
+  app.post("/api/push/register-native", async (req, res) => {
+    const userId = req.session?.userId;
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { token } = req.body || {};
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "token required" });
+    }
+    try {
+      const sub = await storage.upsertPushSubscription({
+        associateId: userId,
+        endpoint: token,
+        p256dh: "",
+        auth: "",
+        userAgent: req.headers["user-agent"] || null,
+        platform: "android",
+      });
+      res.json({ ok: true, id: sub.id });
+    } catch (err: any) {
+      console.error("Native push register error:", err);
+      res.status(500).json({ error: "Failed to register device" });
+    }
+  });
+
   // Remove a subscription (called when the user disables notifications or the browser
   // rotates the endpoint). No auth needed — knowing the endpoint is sufficient.
   app.post("/api/push/unsubscribe", async (req, res) => {
