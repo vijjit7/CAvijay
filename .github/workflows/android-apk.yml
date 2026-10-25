@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       # ubuntu-latest ships a full Android SDK already; just accept the licenses so
       # Gradle/AGP can auto-download any missing platform/build-tools at build time.
