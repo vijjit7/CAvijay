@@ -30,11 +30,12 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0"
+      # ubuntu-latest ships a full Android SDK already; just accept the licenses so
+      # Gradle/AGP can auto-download any missing platform/build-tools at build time.
+      # (We avoid android-actions/setup-android@v3, which crashes trying to install the
+      # obsolete "tools" package.)
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
