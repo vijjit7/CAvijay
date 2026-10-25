@@ -44,12 +44,29 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(
     (async () => {
-      await self.registration.showNotification(title, options);
-      // If the app is already open, tell it to start the in-app ringing alarm now —
-      // the service worker itself can't play audio, but a live window can.
+      // If the app is already open, tell it to start the in-app ringing alarm now — the
+      // service worker itself can't play audio, but a live window can. Do this first so
+      // a foreground app rings in parallel with (not after) the notification.
       const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      let appIsOpen = false;
       for (const client of clientList) {
+        appIsOpen = true;
         client.postMessage({ type: "new-work", body });
+      }
+
+      // Show the notification. When the app is NOT open there's no window to ring, and a
+      // service worker can't play a looping sound — so instead we re-fire the
+      // notification several times (renotify), and each re-fire re-triggers the system
+      // notification sound + vibration. That gives an automatic, repeating alert the
+      // moment the push arrives, without waiting for the associate to tap it. Bounded to
+      // a short burst so we stay within the service worker's allowed runtime.
+      const rounds = appIsOpen ? 1 : 6;
+      const gapMs = 2500;
+      for (let i = 0; i < rounds; i++) {
+        await self.registration.showNotification(title, options);
+        if (i < rounds - 1) {
+          await new Promise((resolve) => setTimeout(resolve, gapMs));
+        }
       }
     })(),
   );
