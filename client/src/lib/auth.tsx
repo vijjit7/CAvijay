@@ -24,10 +24,48 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Persist the logged-in associate locally so the installed PWA reopens
+// straight into the app (no login-page flash) and keeps them signed in while
+// the session cookie is re-validated in the background.
+const STORED_USER_KEY = "auditguard.user";
+
+function readStoredUser(): User | null {
+  try {
+    const raw = localStorage.getItem(STORED_USER_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredUser(user: User | null) {
+  try {
+    if (user) {
+      localStorage.setItem(STORED_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORED_USER_KEY);
+    }
+  } catch {
+    // Ignore storage failures (private mode / quota) — session cookie still rules.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  // Hydrate synchronously from the last known associate so the first render
+  // already shows the app for a returning user instead of the login screen.
+  const [user, setUserState] = useState<User | null>(() => readStoredUser());
   const [loading, setLoading] = useState(true);
   const [, setLocation] = useLocation();
+
+  // Keep local storage in lockstep with the in-memory user. Accepts either a
+  // value or a functional updater, matching React's setState signature.
+  const setUser = (next: User | null | ((prev: User | null) => User | null)) => {
+    setUserState((prev) => {
+      const resolved = typeof next === "function" ? (next as (p: User | null) => User | null)(prev) : next;
+      writeStoredUser(resolved);
+      return resolved;
+    });
+  };
 
   useEffect(() => {
     checkAuth();
@@ -42,8 +80,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+      } else if (response.status === 401 || response.status === 403) {
+        // Session genuinely gone — drop the cached associate and sign out.
+        setUser(null);
       }
+      // Other statuses (e.g. 5xx) keep the cached user so a flaky server
+      // doesn't bounce an associate to the login screen.
     } catch (error) {
+      // Network error (offline): keep the cached associate signed in.
       console.error('Auth check failed:', error);
     } finally {
       setLoading(false);

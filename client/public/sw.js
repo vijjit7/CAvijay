@@ -25,21 +25,42 @@ self.addEventListener("push", (event) => {
   }
 
   const title = data.title || "New work allocated";
+  const body = data.body || "A new case is in your intray.";
   const options = {
-    body: data.body || "A new case is in your intray.",
+    body,
     icon: "/favicon.png",
     badge: "/favicon.png",
     tag: data.tag || "mis-new-work",
     renotify: true,
+    // Keep the notification on screen until the associate acts on it, rather than
+    // auto-dismissing after a few seconds — this is the closest a background PWA can
+    // get to "alarm until noticed" (a service worker can't play a looping sound).
+    requireInteraction: true,
+    // Strong, attention-grabbing buzz. (Honoured on Android Chrome; ignored where the
+    // platform doesn't support notification vibration.)
+    vibrate: data.vibrate || [600, 300, 600, 300, 600, 300, 600],
     data: { url: data.url || "/mis" },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, options);
+      // If the app is already open, tell it to start the in-app ringing alarm now —
+      // the service worker itself can't play audio, but a live window can.
+      const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of clientList) {
+        client.postMessage({ type: "new-work", body });
+      }
+    })(),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/mis";
+  const baseUrl = (event.notification.data && event.notification.data.url) || "/mis";
+  // Carry an "alarm" flag so the app starts ringing the moment it's focused/opened
+  // from the notification, and keeps ringing until the associate silences it.
+  const targetUrl = baseUrl + (baseUrl.includes("?") ? "&" : "?") + "alarm=1";
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
@@ -47,6 +68,7 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clientList) {
         if ("focus" in client) {
           client.navigate(targetUrl).catch(() => {});
+          client.postMessage({ type: "new-work" });
           return client.focus();
         }
       }

@@ -30,28 +30,51 @@ function normalizeKey(address: string): string {
 }
 
 /**
- * Geocode a free-text address to coordinates. Biased to India (region=in,
- * components=country:IN) since all case addresses are Indian localities. Returns null
- * when geocoding is unconfigured, the address is blank, nothing matches, or the request
- * fails — callers must treat null as "distance unavailable", never an error.
+ * Turn a case address into the queries we'll try against the Geocoding API, best first.
+ *
+ * Case addresses are "house no, area, city". A house number is exactly what Google most
+ * often can't resolve (→ ZERO_RESULTS, so no distance line), while the AREA is both
+ * reliably geocodable and the right granularity for a "~X km away" hint. So we try the
+ * area (with its city for disambiguation) first, then fall back to the full address,
+ * then to the city alone.
  */
-export async function geocodeAddress(address: string | null | undefined): Promise<LatLng | null> {
-  if (!apiKey) return null;
-  const raw = (address || "").trim();
-  if (!raw) return null;
+function addressCandidates(raw: string): string[] {
+  const segments = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  const key = normalizeKey(raw);
+  const candidates: string[] = [];
+  // Area + city: drop the leading house-number segment when the address has the full
+  // three-part shape. This is the query the distance hint really wants.
+  if (segments.length >= 3) {
+    candidates.push(segments.slice(1).join(", "));
+  }
+  // Full address exactly as entered.
+  candidates.push(raw);
+  // Last-ditch: the city / final segment on its own.
+  if (segments.length >= 2) {
+    candidates.push(segments[segments.length - 1]);
+  }
+  // De-dupe, preserving order.
+  return Array.from(new Set(candidates));
+}
+
+// Geocode one concrete query string. Caches the result (including a confirmed miss) so
+// repeated pushes / overlapping candidates never re-hit the API for the same text.
+async function geocodeOnce(query: string): Promise<LatLng | null> {
+  const key = normalizeKey(query);
   if (cache.has(key)) return cache.get(key)!;
 
   try {
     const url =
       "https://maps.googleapis.com/maps/api/geocode/json" +
-      `?address=${encodeURIComponent(raw)}` +
+      `?address=${encodeURIComponent(query)}` +
       "&region=in&components=country:IN" +
       `&key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url);
     if (!res.ok) {
-      console.error("[Geocode] HTTP", res.status, "for address:", raw);
+      console.error("[Geocode] HTTP", res.status, "for:", query);
       cache.set(key, null);
       return null;
     }
@@ -62,10 +85,10 @@ export async function geocodeAddress(address: string | null | undefined): Promis
       cache.set(key, result);
       return result;
     }
-    // ZERO_RESULTS is an expected outcome for a vague address; log anything else, since
+    // ZERO_RESULTS is an expected outcome for a vague query; log anything else, since
     // REQUEST_DENIED / OVER_QUERY_LIMIT point at a config/billing problem to fix.
     if (data.status !== "ZERO_RESULTS") {
-      console.error("[Geocode] status", data.status, data.error_message || "", "for:", raw);
+      console.error("[Geocode] status", data.status, data.error_message || "", "for:", query);
     }
     cache.set(key, null);
     return null;
@@ -74,6 +97,33 @@ export async function geocodeAddress(address: string | null | undefined): Promis
     cache.set(key, null);
     return null;
   }
+}
+
+/**
+ * Geocode a case address to coordinates, biased to India (region=in,
+ * components=country:IN). Tries the area-focused query first (see addressCandidates),
+ * then the full address, then the city. Returns null when geocoding is unconfigured, the
+ * address is blank, or nothing resolves — callers must treat null as "distance
+ * unavailable", never an error.
+ */
+export async function geocodeAddress(address: string | null | undefined): Promise<LatLng | null> {
+  if (!apiKey) return null;
+  const raw = (address || "").trim();
+  if (!raw) return null;
+
+  const key = normalizeKey(raw);
+  if (cache.has(key)) return cache.get(key)!;
+
+  for (const candidate of addressCandidates(raw)) {
+    const loc = await geocodeOnce(candidate);
+    if (loc) {
+      cache.set(key, loc);
+      return loc;
+    }
+  }
+
+  cache.set(key, null);
+  return null;
 }
 
 // Great-circle distance between two points in kilometres (haversine).

@@ -21,6 +21,16 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return output;
 }
 
+// True when the app is running as an installed/standalone PWA (not a browser tab).
+export function isInstalledStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    // iOS Safari exposes this non-standard flag on navigator.
+    (window.navigator as any).standalone === true
+  );
+}
+
 export function isPushSupported(): boolean {
   return (
     typeof navigator !== "undefined" &&
@@ -130,6 +140,41 @@ export async function subscribeToPush(): Promise<{ ok: boolean; error?: string }
     console.error("[Push] subscribe failed:", err);
     return { ok: false, error: err?.message || "Could not enable notifications." };
   }
+}
+
+// When the app is launched as an installed PWA, proactively secure the two phone
+// permissions it needs to do its job:
+//   • notifications — powers the new-work alarm;
+//   • location — powers the "~X km away" distance hint in that notification.
+// Must be called while an associate is logged in so the server can map this device's
+// push endpoint to them. No-ops in a plain browser tab, when push isn't
+// configured/supported, or when notifications were already blocked — so it's safe to
+// call on every launch.
+export async function ensureInstalledAppPermissions(): Promise<void> {
+  if (!isInstalledStandalone() || !isPushSupported()) return;
+  if (Notification.permission === "denied") return;
+
+  const { enabled } = await fetchVapidConfig();
+  if (!enabled) return;
+
+  let alreadySubscribed = false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    alreadySubscribed = !!(await reg.pushManager.getSubscription());
+  } catch {
+    return;
+  }
+
+  // First launch: request notification permission (OS prompt) and register the
+  // subscription. subscribeToPush() also seeds this device's location on success.
+  if (!alreadySubscribed) {
+    await subscribeToPush();
+    return;
+  }
+
+  // Already subscribed on a later launch — still make sure we have a location so the
+  // distance hint can be computed. Prompts for geolocation if not yet granted.
+  void reportLocationOnce();
 }
 
 // Read the device's current location and send it to the server, tagged with this

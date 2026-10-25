@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -22,6 +23,8 @@ import ReceiptsAndPaymentsBreakdownPage from "@/pages/receipts-and-payments-brea
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuditProvider } from "@/lib/audit-context";
 import { ChangePasswordGate } from "@/components/change-password-gate";
+import { NewWorkAlarm } from "@/components/new-work-alarm";
+import { ensureInstalledAppPermissions } from "@/lib/push";
 import { isOfficeAssociate } from "@shared/schema";
 
 // Office associates may only claim bills — confine them to /bill.
@@ -29,8 +32,11 @@ const OFFICE_ASSOCIATE_ALLOWED = new Set(["/bill"]);
 
 // Protected Route Wrapper
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [location] = useLocation();
+  // While the first session check is still in flight and we have no cached
+  // associate, wait instead of flashing the login page (installed-PWA launch).
+  if (!user && loading) return null;
   if (!user) return <Redirect to="/login" />;
   if (isOfficeAssociate(user) && !OFFICE_ASSOCIATE_ALLOWED.has(location)) {
     return <Redirect to="/bill" />;
@@ -95,6 +101,16 @@ function Router() {
   );
 }
 
+// When the installed app is opened by a logged-in associate, make sure the phone has
+// granted notification permission (which powers the new-work alarm).
+function InstalledAppPermissions() {
+  const { user } = useAuth();
+  useEffect(() => {
+    if (user) void ensureInstalledAppPermissions();
+  }, [user]);
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -104,6 +120,8 @@ function App() {
             <Toaster />
             <Router />
             <ChangePasswordGate />
+            <InstalledAppPermissions />
+            <NewWorkAlarm />
           </TooltipProvider>
         </AuditProvider>
       </AuthProvider>

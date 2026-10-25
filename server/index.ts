@@ -64,11 +64,16 @@ app.use(
     secret: process.env.SESSION_SECRET || "auditguard-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
+    // Refresh the cookie's expiry on every request so an actively-used
+    // (installed PWA) session effectively never expires. Combined with the
+    // long maxAge below, an associate stays logged in as long as they keep
+    // opening the app.
+    rolling: true,
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      maxAge: 1000 * 60 * 60 * 24 * 180, // 180 days
     },
   })
 );
