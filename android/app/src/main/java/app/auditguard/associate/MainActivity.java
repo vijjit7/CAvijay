@@ -44,7 +44,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         // Register (or refresh) the push token every time the app comes to the
         // foreground — by then the associate is usually logged in, so the session
