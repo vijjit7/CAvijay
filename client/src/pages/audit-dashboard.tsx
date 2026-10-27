@@ -39,6 +39,18 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { format, parseISO } from "date-fns";
 
+// Build a rolling list of the most recent `count` months (current month first).
+// Each entry's `key`/`label` is "<Month> <Year>" (e.g. "October 2026") so the
+// values stay unique across years and the dropdowns update automatically.
+function getRecentMonths(count: number) {
+  const now = new Date();
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const label = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    return { key: label, label, month: d.getMonth(), year: d.getFullYear() };
+  });
+}
+
 export default function AuditDashboard() {
   const { user } = useAuth();
   const { reports, associates } = useAudit();
@@ -81,9 +93,10 @@ function AssociateDashboard({ user, reports, selectedMonth, setSelectedMonth }: 
                  <SelectValue placeholder="Select Month" />
                </SelectTrigger>
                <SelectContent>
-                 <SelectItem value="October">October 2024</SelectItem>
-                 <SelectItem value="November">November 2024</SelectItem>
-                 <SelectItem value="December">December 2024</SelectItem>
+                 <SelectItem value="All">All Time</SelectItem>
+                 {getRecentMonths(12).map((m) => (
+                   <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>
+                 ))}
                </SelectContent>
              </Select>
            </div>
@@ -465,14 +478,12 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
   };
 
   // Month-year mapping for filter (month is 0-indexed for JS Date)
-  const monthYearMap: { [key: string]: { month: number; year: number } } = {
-    'October': { month: 9, year: 2025 },
-    'November': { month: 10, year: 2025 },
-    'December': { month: 11, year: 2025 },
-    'January': { month: 0, year: 2026 },
-    'February': { month: 1, year: 2026 },
-    'March': { month: 2, year: 2026 },
-  };
+  // Rolling list of the last 12 months, powering both the selector dropdown and
+  // the month+year lookup used to filter reports.
+  const recentMonths = getRecentMonths(12);
+  const monthYearMap: { [key: string]: { month: number; year: number } } = Object.fromEntries(
+    recentMonths.map((m) => [m.key, { month: m.month, year: m.year }])
+  );
 
   // Filter reports by selected month+year
   const getMonthReports = (month: string) => {
@@ -547,12 +558,9 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
                  </SelectTrigger>
                  <SelectContent>
                    <SelectItem value="All">All Time</SelectItem>
-                   <SelectItem value="October">October 2025</SelectItem>
-                   <SelectItem value="November">November 2025</SelectItem>
-                   <SelectItem value="December">December 2025</SelectItem>
-                   <SelectItem value="January">January 2026</SelectItem>
-                   <SelectItem value="February">February 2026</SelectItem>
-                   <SelectItem value="March">March 2026</SelectItem>
+                   {recentMonths.map((m) => (
+                     <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>
+                   ))}
                  </SelectContent>
                </Select>
              </div>
