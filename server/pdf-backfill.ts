@@ -17,6 +17,9 @@ export interface BackfillResult {
   migrated: number;
   failed: number;
   remaining: number;
+  // First error encountered (if any), to diagnose systemic failures without
+  // digging through server logs.
+  sampleError?: string;
 }
 
 export async function backfillReportPdfs(opts?: {
@@ -38,6 +41,7 @@ export async function backfillReportPdfs(opts?: {
 
   let migrated = 0;
   let failed = 0;
+  let sampleError: string | undefined;
 
   while (migrated + failed < maxToProcess && Date.now() < deadline) {
     const { rows } = await pool.query<{
@@ -67,6 +71,9 @@ export async function backfillReportPdfs(opts?: {
         migrated++;
       } catch (err) {
         failed++;
+        if (!sampleError) {
+          sampleError = `${(err as any)?.name || "Error"}: ${(err as any)?.message || String(err)}`;
+        }
         console.error(`[pdf-backfill] FAILED report ${r.id}:`, err);
       }
     }
@@ -77,5 +84,5 @@ export async function backfillReportPdfs(opts?: {
   );
   const remaining = Number(cnt[0]?.n ?? 0);
 
-  return { migrated, failed, remaining };
+  return { migrated, failed, remaining, sampleError };
 }
