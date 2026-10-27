@@ -3687,6 +3687,31 @@ showpage
     }
   });
 
+  // Migrate report PDFs from inline base64 (pdf_content) into object storage (R2).
+  // Runs server-side (where the DB + R2 env live) in bounded chunks so it fits in
+  // an HTTP request; the admin UI/caller polls until `remaining` reaches 0.
+  app.post("/api/admin/backfill-pdfs-to-r2", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Only admin can run the PDF backfill" });
+      }
+      if (!isObjectStorageConfigured()) {
+        return res.status(400).json({ error: "Object storage is not configured (set the R2_* env vars first)" });
+      }
+
+      const { backfillReportPdfs } = await import("./pdf-backfill");
+      // Process up to ~25s per call to stay within request limits; the caller
+      // repeats until remaining === 0.
+      const result = await backfillReportPdfs({ maxMs: 25000 });
+      console.log(`[PURGE/R2] Backfill chunk:`, result);
+
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Backfill PDFs to R2 error:", error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Backfill failed" });
+    }
+  });
+
   // Purge PDF content from reports (nulls pdf_content without deleting reports)
   app.post("/api/admin/purge-pdf-content", async (req, res) => {
     try {
