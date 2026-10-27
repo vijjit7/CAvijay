@@ -9,7 +9,6 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  LineChart,
   Line,
   Legend
 } from "recharts";
@@ -507,23 +506,13 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
     return { totalReports, avgScore };
   };
   
-  // Calculate weekly performance data for the chart
-  const getWeeklyPerformance = () => {
-    const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-    return weeks.map((weekName, weekIndex) => {
-      const weekReports = currentMonthReports.filter((r: any) => {
-        const day = new Date(r.date).getDate();
-        const reportWeek = Math.floor((day - 1) / 7);
-        return reportWeek === weekIndex;
-      });
-      const avgScore = weekReports.length > 0
-        ? Math.round(weekReports.reduce((sum: number, r: any) => sum + (r.scores?.overall || 0), 0) / weekReports.length)
-        : 0;
-      return { name: weekName, score: avgScore, count: weekReports.length };
-    });
-  };
-  
-  const performanceData = getWeeklyPerformance();
+  // Number of reports uploaded per month across the tracked months, for the
+  // Compliance Trends chart. Uses the same month+year buckets as the rest of
+  // the dashboard so the counts line up with the month selector/stat cards.
+  const monthlyUploadsData = Object.keys(monthYearMap).map((monthName) => ({
+    name: monthName.slice(0, 3),
+    count: getMonthReports(monthName).length,
+  }));
 
   return (
     <AuditLayout>
@@ -685,39 +674,37 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
           <Card className="col-span-1 lg:col-span-2">
             <CardHeader>
               <CardTitle>Compliance Trends - {selectedMonth}</CardTitle>
-              <CardDescription>Weekly average report scores</CardDescription>
+              <CardDescription>Number of monthly reports uploaded</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={performanceData}>
+                  <BarChart data={monthlyUploadsData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis 
-                      dataKey="name" 
-                      stroke="#64748b" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
+                    <XAxis
+                      dataKey="name"
+                      stroke="#64748b"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
                     />
-                    <YAxis 
-                      stroke="#64748b" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                      domain={[0, 100]}
+                    <YAxis
+                      stroke="#64748b"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      allowDecimals={false}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ backgroundColor: 'white', borderRadius: '8px', border: '1px solid #e2e8f0' }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="score" 
-                      stroke="#2563eb" 
-                      strokeWidth={3} 
-                      dot={{ r: 4, fill: "#2563eb", strokeWidth: 2, stroke: "#fff" }}
-                      activeDot={{ r: 6 }}
+                    <Bar
+                      dataKey="count"
+                      name="Reports uploaded"
+                      fill="#2563eb"
+                      radius={[4, 4, 0, 0]}
                     />
-                  </LineChart>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
