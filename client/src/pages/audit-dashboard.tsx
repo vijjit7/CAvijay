@@ -506,13 +506,29 @@ function AdminDashboard({ reports, associates, selectedMonth, setSelectedMonth }
     return { totalReports, avgScore };
   };
   
-  // Number of reports uploaded per month across the tracked months, for the
-  // Compliance Trends chart. Uses the same month+year buckets as the rest of
-  // the dashboard so the counts line up with the month selector/stat cards.
-  const monthlyUploadsData = Object.keys(monthYearMap).map((monthName) => ({
-    name: monthName.slice(0, 3),
-    count: getMonthReports(monthName).length,
-  }));
+  // Number of reports uploaded in each of the last 6 months (including the
+  // current month), for the Compliance Trends chart. Built dynamically from
+  // today's date so it always reflects recent activity, and counted by upload
+  // date (createdAt), falling back to the report date.
+  const monthlyUploadsData = (() => {
+    const now = new Date();
+    const buckets = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return {
+        name: d.toLocaleString('en-US', { month: 'short' }),
+        month: d.getMonth(),
+        year: d.getFullYear(),
+        count: 0,
+      };
+    });
+    reports.forEach((r: any) => {
+      const rd = new Date(r.createdAt || r.date);
+      if (isNaN(rd.getTime())) return;
+      const bucket = buckets.find(b => b.month === rd.getMonth() && b.year === rd.getFullYear());
+      if (bucket) bucket.count++;
+    });
+    return buckets.map(({ name, count }) => ({ name, count }));
+  })();
 
   return (
     <AuditLayout>
