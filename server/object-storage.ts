@@ -22,13 +22,33 @@ import { randomBytes } from "crypto";
 const accountId = process.env.R2_ACCOUNT_ID;
 const accessKeyId = process.env.R2_ACCESS_KEY_ID;
 const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-const bucket = process.env.R2_BUCKET;
+const bucket = process.env.R2_BUCKET?.trim();
+
+// Build the S3 endpoint, tolerating a value that was pasted as the full endpoint
+// URL/host (e.g. "https://<id>.r2.cloudflarestorage.com") instead of the bare
+// account id. Also honours an explicit R2_ENDPOINT override.
+function resolveEndpoint(): string | undefined {
+  if (process.env.R2_ENDPOINT) return process.env.R2_ENDPOINT.trim();
+  let id = (accountId || "").trim();
+  if (!id) return undefined;
+  // If a full "<id>.r2.cloudflarestorage.com" host was pasted, pull out the id.
+  const m = id.match(/([a-z0-9]+)\.r2\.cloudflarestorage\.com/i);
+  if (m) {
+    id = m[1];
+  } else {
+    // Otherwise strip any scheme/path so a bare id (or "https://id") still works.
+    id = id.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  }
+  return `https://${id}.r2.cloudflarestorage.com`;
+}
+
+const endpoint = resolveEndpoint();
 
 const client: S3Client | null =
-  accountId && accessKeyId && secretAccessKey && bucket
+  endpoint && accessKeyId && secretAccessKey && bucket
     ? new S3Client({
         region: "auto",
-        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        endpoint,
         credentials: { accessKeyId, secretAccessKey },
       })
     : null;
