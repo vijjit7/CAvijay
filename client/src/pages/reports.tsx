@@ -251,10 +251,26 @@ export default function ReportsPage() {
   // Debug: Log to help diagnose production issues
   console.log('[REPORTS PAGE] Total reports loaded:', reports.length);
   
-  const filteredReports = reports.filter(r => 
-    r.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    r.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Associates (non-admin, non-approver) only see the current month's reports;
+  // admins and approvers can see every month. Mirrors the MIS page behaviour.
+  const curMonth = today.getMonth();
+  const curYear = today.getFullYear();
+  const canViewAllMonths = Boolean(user?.isAdmin || user?.isApprover);
+  const isInCurrentMonth = (value: string | Date | null | undefined): boolean => {
+    if (!value) return false;
+    const d = new Date(value);
+    return !isNaN(d.getTime()) && d.getMonth() === curMonth && d.getFullYear() === curYear;
+  };
+
+  const filteredReports = reports.filter(r => {
+    if (!canViewAllMonths && !isInCurrentMonth(r.createdAt || r.date)) {
+      return false;
+    }
+    return (
+      r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.id.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   const getAssociate = (associateId: string) => {
     return associates.find(a => a.id === associateId);
@@ -328,17 +344,19 @@ export default function ReportsPage() {
                 Compare ({selectedReports.length})
               </Button>
             </Link>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-               <SelectTrigger className="w-[180px]">
-                 <SelectValue placeholder="Filter by Month" />
-               </SelectTrigger>
-               <SelectContent>
-                 <SelectItem value="all">All Months</SelectItem>
-                 <SelectItem value="october">October 2024</SelectItem>
-                 <SelectItem value="november">November 2024</SelectItem>
-                 <SelectItem value="december">December 2024</SelectItem>
-               </SelectContent>
-             </Select>
+            {canViewAllMonths && (
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                 <SelectTrigger className="w-[180px]">
+                   <SelectValue placeholder="Filter by Month" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">All Months</SelectItem>
+                   <SelectItem value="october">October 2024</SelectItem>
+                   <SelectItem value="november">November 2024</SelectItem>
+                   <SelectItem value="december">December 2024</SelectItem>
+                 </SelectContent>
+               </Select>
+            )}
           </div>
         </div>
 
