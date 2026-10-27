@@ -1,9 +1,14 @@
 # Nixpacks configuration for Railway deployment
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+# ghostscript ("gs") is required at runtime for server-side PDF
+# generation/compression (see server/routes.ts). Without it those
+# features fail on Railway the same way they would on a bare Node image.
+nixPkgs = ["nodejs_20", "npm", "ghostscript"]
 
 [phases.install]
-cmds = ["npm ci"]
+# --include=dev so the build tools (vite, esbuild, tsx, tailwind) install
+# even when NODE_ENV=production is set as a Railway service variable.
+cmds = ["npm ci --include=dev"]
 
 [phases.build]
 cmds = ["npm run build"]

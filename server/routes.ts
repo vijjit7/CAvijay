@@ -2074,11 +2074,19 @@ showpage
     try {
       const { id } = req.params;
       const report = await storage.getReportById(id);
-      
+
       if (!report) {
         return res.status(404).json({ error: "Report not found" });
       }
-      
+
+      // Scope by role: admins/approvers can download any report; a regular
+      // associate may only download reports they uploaded themselves.
+      const sessionUserId = req.session?.userId;
+      const canViewAllReports = sessionUserId === 'ADMIN' || sessionUserId === 'PROP';
+      if (!canViewAllReports && report.associateId !== sessionUserId) {
+        return res.status(403).json({ error: "You can only download your own reports" });
+      }
+
       let pdfBuffer: Buffer;
       
       if (!report.pdfContent) {
@@ -2943,10 +2951,20 @@ showpage
     console.log('[REPORTS-API-V4] Request received at', new Date().toISOString());
     try {
       const { associateId, status, month, year, simple, limit: limitStr, offset: offsetStr } = req.query;
-      
+
       const filters: any = {};
-      
-      if (associateId && typeof associateId === 'string') {
+
+      // Scope results by role: admins and approvers (ADMIN/PROP) can see every
+      // associate's reports; a regular associate may only view the reports they
+      // uploaded themselves, regardless of any associateId query param.
+      const sessionUserId = req.session?.userId;
+      const canViewAllReports = sessionUserId === 'ADMIN' || sessionUserId === 'PROP';
+
+      if (!canViewAllReports) {
+        // Sentinel for an unauthenticated request so it matches no reports
+        // instead of falling through to an unfiltered (all-reports) query.
+        filters.associateId = sessionUserId || '__no_session__';
+      } else if (associateId && typeof associateId === 'string') {
         filters.associateId = associateId;
       }
       
@@ -3182,11 +3200,19 @@ showpage
       const { id } = req.params;
       
       const report = await storage.getReportById(id);
-      
+
       if (!report) {
         return res.status(404).json({ error: "Report not found" });
       }
-      
+
+      // Scope by role: admins/approvers can open any report; a regular
+      // associate may only open reports they uploaded themselves.
+      const sessionUserId = req.session?.userId;
+      const canViewAllReports = sessionUserId === 'ADMIN' || sessionUserId === 'PROP';
+      if (!canViewAllReports && report.associateId !== sessionUserId) {
+        return res.status(403).json({ error: "You can only view your own reports" });
+      }
+
       return res.json(report);
     } catch (error) {
       console.error("Get report error:", error);
@@ -3840,9 +3866,19 @@ showpage
   // MIS (Management Information System) routes - Centralized MIS
   app.get("/api/mis", async (req, res) => {
     try {
-      // Return all entries for centralized MIS
       const entries = await storage.getMisEntries();
-      return res.json(entries);
+
+      // Scope by role: admins and approvers (ADMIN/PROP) see the centralized MIS
+      // in full; a regular associate may only see cases allocated to them
+      // (pdPersonId === their id).
+      const sessionUserId = req.session?.userId;
+      const canViewAllEntries = sessionUserId === 'ADMIN' || sessionUserId === 'PROP';
+      if (canViewAllEntries) {
+        return res.json(entries);
+      }
+
+      const myEntries = entries.filter(e => e.pdPersonId === sessionUserId);
+      return res.json(myEntries);
     } catch (error) {
       console.error("Get MIS entries error:", error);
       return res.status(500).json({ error: "Internal server error" });

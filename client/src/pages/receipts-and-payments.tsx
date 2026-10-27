@@ -210,12 +210,11 @@ export default function ReceiptsAndPaymentsPage() {
     });
   }, [stmtTxns]);
 
-  useEffect(() => { loadStatements(); /* eslint-disable-next-line */ }, [month]);
+  useEffect(() => { loadStatements(); }, [month]);
   useEffect(() => {
     setPendingTxnChanges({});
     if (selectedStmtId != null) loadStatementDetail(selectedStmtId);
     else { setSelectedStmt(null); setStmtTxns([]); }
-    /* eslint-disable-next-line */
   }, [selectedStmtId]);
 
   useEffect(() => {

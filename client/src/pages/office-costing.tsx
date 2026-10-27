@@ -178,7 +178,6 @@ export default function OfficeCostingPage() {
     if (tab === "approvals") { loadApprovals(); loadBalance(); }
     else if (tab === "own") loadOwn();
     else if (tab === "report") loadReport();
-    /* eslint-disable-next-line */
   }, [tab, month, statusFilter, userFilter]);
 
   async function act(id: number, action: "approve" | "mark-paid") {

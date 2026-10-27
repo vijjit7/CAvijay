@@ -80,7 +80,7 @@ export default function BillPage() {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterMonth]);
+  useEffect(() => { load(); }, [filterMonth]);
 
   async function submit() {
     if (!date || !category || !amount) {

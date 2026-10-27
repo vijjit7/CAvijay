@@ -18,6 +18,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# ghostscript ("gs") is required at runtime for server-side PDF
+# generation/compression (see server/routes.ts).
+RUN apk add --no-cache ghostscript
+
 # Copy built artifacts
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
