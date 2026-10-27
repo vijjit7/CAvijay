@@ -24,6 +24,7 @@ import { isAIConfigured } from "./openrouter";
 import { scoreDraft } from "./deterministic-scoring";
 import { searchLeadIdInMIS, parseFlexibleDate } from "./sheets";
 import exifr from "exifr";
+import { persistReportPdf, loadStoredReportPdf, deletePdf, isObjectStorageConfigured } from "./object-storage";
 // NOTE: db is imported lazily in handlers to avoid crash if DATABASE_URL not set
 // import { db } from "./db";
 // import { sql } from "drizzle-orm";
@@ -1543,8 +1544,7 @@ export async function registerRoutes(
         },
         remarks: selectedRemarks,
         summary: selectedSummary,
-        pdfContent: compressedBuffer.toString('base64'),
-        fileSize: compressedSize
+        ...(await persistReportPdf(leadId, date, compressedBuffer))
       });
 
       // Mark corresponding MIS entry as completed with report date
@@ -1956,8 +1956,7 @@ export async function registerRoutes(
         },
         remarks: selectedRemarks,
         summary: selectedSummary,
-        pdfContent: compressedBuffer.toString('base64'),
-        fileSize: compressedSize
+        ...(await persistReportPdf(leadId, date, compressedBuffer))
       });
 
       // Mark corresponding MIS entry as completed with report date
@@ -2087,10 +2086,11 @@ showpage
         return res.status(403).json({ error: "You can only download your own reports" });
       }
 
-      let pdfBuffer: Buffer;
-      
-      if (!report.pdfContent) {
-        // Generate PDF on-the-fly for reports without stored PDF
+      // Load from object storage (R2) or legacy inline base64; fall back to
+      // on-the-fly generation when the report has no stored PDF.
+      let pdfBuffer = await loadStoredReportPdf(report);
+
+      if (!pdfBuffer) {
         console.log(`Generating PDF on-the-fly for report ${id}`);
         try {
           pdfBuffer = await generateReportPdf(report);
@@ -2098,10 +2098,8 @@ showpage
           console.error("Failed to generate PDF:", genError);
           return res.status(500).json({ error: "Failed to generate PDF for this report" });
         }
-      } else {
-        pdfBuffer = Buffer.from(report.pdfContent, 'base64');
       }
-      
+
       const fileName = `${report.leadId || report.id}_report.pdf`;
       
       res.setHeader('Content-Type', 'application/pdf');
@@ -2774,13 +2772,13 @@ showpage
       }
 
       // Generate PDF from draft data
-      let pdfContent = "";
-      let fileSize = 0;
+      const today = new Date().toISOString().split('T')[0];
+      let generatedPdfBuffer: Buffer | null = null;
+      let pdfFields: { pdfKey?: string; pdfContent?: string; fileSize?: number } = {};
       try {
-        const pdfBuffer = await generateDraftPdf(draft, draft.leadId);
-        pdfContent = pdfBuffer.toString('base64');
-        fileSize = pdfBuffer.length;
-        console.log(`Generated PDF for audio report ${draft.leadId}: ${(fileSize/1024).toFixed(1)}KB`);
+        generatedPdfBuffer = await generateDraftPdf(draft, draft.leadId);
+        pdfFields = await persistReportPdf(draft.leadId, today, generatedPdfBuffer);
+        console.log(`Generated PDF for audio report ${draft.leadId}: ${(generatedPdfBuffer.length/1024).toFixed(1)}KB`);
       } catch (error) {
         console.error('Failed to generate PDF for audio report:', error);
       }
@@ -2789,8 +2787,6 @@ showpage
       console.log(`[Submit Draft] Scoring draft for ${draft.leadId} using deterministic scoring...`);
       const scoringResult = scoreDraft(draft);
       console.log(`[Submit Draft] Scoring complete: Total=${scoringResult.scores.total}/100`);
-      
-      const today = new Date().toISOString().split('T')[0];
       const reportId = `${draft.leadId}_${today.replace(/-/g, '').slice(2)}_${randomBytes(2).toString('hex')}`;
 
       const report = await storage.createReport({
@@ -2835,27 +2831,27 @@ showpage
         },
         remarks: draft.remarks || [],
         summary: draft.summary || "",
-        pdfContent: pdfContent || undefined,
-        fileSize: fileSize || undefined
+        ...pdfFields
       });
 
       // Mark corresponding MIS entry as completed with report date
       await markMisEntryCompleted(draft.leadId, today);
 
       // Trigger AI scoring asynchronously (don't block response)
-      if (pdfContent) {
+      if (generatedPdfBuffer) {
+        const pdfForAi = generatedPdfBuffer;
         (async () => {
           try {
             console.log(`[Auto AI Score] Starting AI scoring for report ${reportId}...`);
             const { scoreComprehensiveWithAI, isAIConfigured } = await import("./ai-scoring");
-            
+
             if (!isAIConfigured()) {
               console.log(`[Auto AI Score] AI not configured, skipping for ${reportId}`);
               return;
             }
 
             // Decode PDF and extract text
-            const pdfBuffer = Buffer.from(pdfContent, 'base64');
+            const pdfBuffer = pdfForAi;
             const pdfDoc = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
             
             let pdfText = '';
@@ -3240,11 +3236,18 @@ showpage
       }
       
       const deleted = await storage.deleteReport(id);
-      
+
       if (!deleted) {
         return res.status(500).json({ error: "Failed to delete report" });
       }
-      
+
+      // Best-effort cleanup of the PDF object in storage (no-op if not on R2).
+      if ((report as any).pdfKey) {
+        deletePdf((report as any).pdfKey).catch((e) =>
+          console.error(`[DELETE] Failed to remove object ${(report as any).pdfKey}:`, e)
+        );
+      }
+
       console.log(`Report ${id} deleted by user ${sessionUserId}`);
       return res.json({ success: true, message: "Report deleted successfully" });
     } catch (error) {
@@ -3264,14 +3267,14 @@ showpage
         return res.status(404).json({ error: "Report not found" });
       }
 
-      if (!report.pdfContent) {
+      const pdfBuffer = await loadStoredReportPdf(report);
+      if (!pdfBuffer) {
         return res.status(400).json({ error: "Report has no PDF content to score" });
       }
 
       console.log(`[Re-score] Starting AI-based re-scoring for report ${id}`);
 
-      // Decode PDF and extract text
-      const pdfBuffer = Buffer.from(report.pdfContent, 'base64');
+      // Extract text from the stored PDF
       const pdfDoc = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
       
       let pdfText = '';
@@ -3561,17 +3564,18 @@ showpage
       archive.append(JSON.stringify(misEntries, null, 2), { name: 'mis_entries.json' });
       console.log("[EXPORT] Added mis_entries.json");
 
-      // Add individual PDFs for each report that has PDF content (process in batches)
+      // Add individual PDFs for each report that has a stored PDF (object
+      // storage or legacy inline base64).
       let pdfCount = 0;
       for (const report of reports) {
-        if ((report as any).pdfContent) {
-          try {
-            const pdfBuffer = Buffer.from((report as any).pdfContent, 'base64');
+        try {
+          const pdfBuffer = await loadStoredReportPdf(report as any);
+          if (pdfBuffer) {
             archive.append(pdfBuffer, { name: `pdfs/${report.id}.pdf` });
             pdfCount++;
-          } catch (e) {
-            console.error(`[EXPORT] Failed to add PDF for report ${report.id}:`, e);
           }
+        } catch (e) {
+          console.error(`[EXPORT] Failed to add PDF for report ${report.id}:`, e);
         }
       }
       console.log(`[EXPORT] Added ${pdfCount} PDFs`);

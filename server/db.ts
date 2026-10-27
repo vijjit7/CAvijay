@@ -166,6 +166,10 @@ export async function ensureSchema(): Promise<void> {
     ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS location_updated_at timestamp;
     -- "web" (PWA Web Push) vs "android" (native app FCM token); added for the native app.
     ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS platform text NOT NULL DEFAULT 'web';
+    -- Object-storage key for report PDFs. When set, the PDF lives in the bucket
+    -- (Cloudflare R2) instead of the base64 pdf_content column, keeping Postgres
+    -- lean. Added for the object-storage migration.
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS pdf_key text;
     -- Migrate deployments created before associate mapping switched from area-name
     -- keywords to 6-digit pincodes. The old location strings can't be matched to
     -- pincodes, so we clear them and let the pincode seed (below) repopulate.

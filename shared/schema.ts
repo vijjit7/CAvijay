@@ -242,7 +242,12 @@ export const reports = pgTable("reports", {
   tat: jsonb("tat").$type<ReportTAT>(),
   tatDelayReason: text("tat_delay_reason"),
   tatDelayRemark: text("tat_delay_remark"),
+  // Legacy inline storage: the full PDF as base64. Retained for backward
+  // compatibility and during migration; new reports use pdfKey (object storage).
   pdfContent: text("pdf_content"),
+  // Object-storage key (Cloudflare R2) for the report PDF. When set, the PDF
+  // lives in the bucket rather than in pdfContent.
+  pdfKey: text("pdf_key"),
   fileSize: integer("file_size"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
