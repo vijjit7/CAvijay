@@ -18,7 +18,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 
 // Fallback users for local development when database is not available
 const DEFAULT_USERS: User[] = [
-  { id: 'ADMIN', username: 'admin', password: 'password@123', name: 'Admin', role: 'System Administrator', avatar: '', mobileNumber: null, onLeave: false },
+  { id: 'ADMIN', username: 'admin', password: 'G@123geabc', name: 'Admin', role: 'System Administrator', avatar: '', mobileNumber: null, onLeave: false },
   { id: 'PROP', username: 'vijay', password: 'password@123', name: 'Vijay Togaru', role: 'Proprietor', avatar: '', mobileNumber: null, onLeave: false },
   { id: 'A1', username: 'bharat', password: 'password123', name: 'Bharat', role: 'Verification Officer', avatar: '', mobileNumber: null, onLeave: false },
   { id: 'A2', username: 'narender', password: 'password123', name: 'Narender', role: 'Verification Officer', avatar: '', mobileNumber: null, onLeave: false },
@@ -436,6 +436,9 @@ export class PostgresStorage implements IStorage {
         scores: insertReport.scores || null,
         tatDelayReason: insertReport.tatDelayReason || null,
         tatDelayRemark: insertReport.tatDelayRemark || null,
+        pdfContent: insertReport.pdfContent ?? null,
+        pdfKey: insertReport.pdfKey ?? null,
+        fileSize: insertReport.fileSize ?? null,
       };
       inMemoryReports.push(report);
       persist();

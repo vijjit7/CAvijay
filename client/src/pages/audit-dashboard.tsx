@@ -16,6 +16,7 @@ import { ArrowUpRight, ArrowDownRight, CheckCircle2, AlertCircle, FileText, Cale
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
+import type { Report } from "@shared/schema";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
 import {
