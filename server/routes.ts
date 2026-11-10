@@ -20,8 +20,7 @@ import { resolveAllocation, pickAssociateForPincode, allocationFields } from "./
 import { getVapidPublicKey, isPushConfigured, notifyAssociateNewWork } from "./push";
 import { isGeocodingConfigured, geocodeAddress } from "./geocode";
 import { fetchLoanProposalsByQuery, searchEmailsByLeadId, isGmailOAuthConfigured } from "./gmail-oauth";
-import { isAIConfigured } from "./openrouter";
-import { scoreDraft } from "./deterministic-scoring";
+import { isAIConfigured } from "./ai-scoring";
 import { searchLeadIdInMIS, parseFlexibleDate } from "./sheets";
 import exifr from "exifr";
 import { persistReportPdf, loadStoredReportPdf, deletePdf, isObjectStorageConfigured } from "./object-storage";
@@ -1327,8 +1326,8 @@ export async function registerRoutes(
       
       // Calculate comprehensive score using AI analysis
       // AI analyzes the PDF content and scores based on actual understanding, not rigid patterns
-      const { scoreComprehensiveWithAI } = await import("./openrouter");
-      
+      const { scoreComprehensiveWithAI } = await import("./ai-scoring");
+
       console.log(`[AI Scoring - ${leadId}] Starting AI-powered comprehensive scoring...`);
       
       const aiScores = await scoreComprehensiveWithAI(pdfText, leadId);
@@ -1354,7 +1353,10 @@ export async function registerRoutes(
       if (completenessScore > 80) qualityScore += 5;
       qualityScore = Math.min(95, qualityScore);
       
-      const overallScore = Math.round((comprehensiveScore + qualityScore) / 2);
+      // Overall = the comprehensive rubric score (0-100). Quality is kept as a
+      // separate metric and no longer averaged in, so low reports aren't masked
+      // by the ~75 quality floor.
+      const overallScore = Math.round(comprehensiveScore);
 
       const allDueDiligenceChecks = [
         'Identity Verification', 'Address Confirmation', 'Business License Check',
@@ -1741,8 +1743,8 @@ export async function registerRoutes(
       
       // Calculate comprehensive score using AI analysis
       // AI analyzes the PDF content and scores based on actual understanding, not rigid patterns
-      const { scoreComprehensiveWithAI } = await import("./openrouter");
-      
+      const { scoreComprehensiveWithAI } = await import("./ai-scoring");
+
       console.log(`[AI Scoring - ${leadId}] Starting AI-powered comprehensive scoring...`);
       
       const aiScores = await scoreComprehensiveWithAI(pdfText, leadId);
@@ -1768,7 +1770,10 @@ export async function registerRoutes(
       if (completenessScore > 80) qualityScore += 5;
       qualityScore = Math.min(95, qualityScore);
       
-      const overallScore = Math.round((comprehensiveScore + qualityScore) / 2);
+      // Overall = the comprehensive rubric score (0-100). Quality is kept as a
+      // separate metric and no longer averaged in, so low reports aren't masked
+      // by the ~75 quality floor.
+      const overallScore = Math.round(comprehensiveScore);
 
       const allDueDiligenceChecks = [
         'Identity Verification', 'Address Confirmation', 'Business License Check',
@@ -2783,10 +2788,48 @@ showpage
         console.error('Failed to generate PDF for audio report:', error);
       }
 
-      // Use deterministic scoring based on ApplicantSchema
-      console.log(`[Submit Draft] Scoring draft for ${draft.leadId} using deterministic scoring...`);
-      const scoringResult = scoreDraft(draft);
-      console.log(`[Submit Draft] Scoring complete: Total=${scoringResult.scores.total}/100`);
+      // Score the generated report PDF with the AI scorer, consistent with the
+      // upload-report routes. scoreComprehensiveWithAI falls back to the rule
+      // engine internally when AI is unavailable.
+      const { scoreComprehensiveWithAI } = await import("./ai-scoring");
+
+      let pdfText = '';
+      if (generatedPdfBuffer) {
+        try {
+          const pdfDoc = await getDocument({ data: new Uint8Array(generatedPdfBuffer) }).promise;
+          for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const textContent = await page.getTextContent();
+            pdfText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+          }
+        } catch (err) {
+          console.error(`[Submit Draft] Failed to extract text from generated PDF for ${draft.leadId}:`, err);
+        }
+      }
+
+      console.log(`[Submit Draft] Scoring draft for ${draft.leadId} using AI scoring...`);
+      const aiScores = await scoreComprehensiveWithAI(pdfText, draft.leadId);
+      const comprehensiveScore = aiScores.personal + aiScores.business + aiScores.banking +
+        aiScores.networth + aiScores.existingDebt + aiScores.endUse + aiScores.referenceChecks;
+      console.log(`[Submit Draft] Scoring complete: Total=${comprehensiveScore}/100`);
+
+      const comprehensiveBreakdown = {
+        personal: aiScores.personal,
+        business: aiScores.business,
+        banking: aiScores.banking,
+        networth: aiScores.networth,
+        existingDebt: aiScores.existingDebt,
+        endUse: aiScores.endUse,
+        referenceChecks: aiScores.referenceChecks,
+        personalMatches: aiScores.personalMatches,
+        businessMatches: aiScores.businessMatches,
+        bankingMatches: aiScores.bankingMatches,
+        networthMatches: aiScores.networthMatches,
+        debtMatches: aiScores.debtMatches,
+        endUseMatches: aiScores.endUseMatches,
+        referenceMatches: aiScores.referenceMatches,
+        rationale: aiScores.rationale,
+      };
       const reportId = `${draft.leadId}_${today.replace(/-/g, '').slice(2)}_${randomBytes(2).toString('hex')}`;
 
       const report = await storage.createReport({
@@ -2800,24 +2843,23 @@ showpage
           photoCount: 5,
           totalFields: 100,
           filledFields: 85,
-          missingFields: scoringResult.warnings,
+          missingFields: [],
           photoValidation: {
             matchedCount: 4,
             missedDetails: [],
             totalKeyDetails: 5
           },
-          riskAnalysisDepth: scoringResult.scores.total >= 70 ? "High" : scoringResult.scores.total >= 40 ? "Medium" : "Low",
+          riskAnalysisDepth: comprehensiveScore >= 70 ? "High" : comprehensiveScore >= 40 ? "Medium" : "Low",
           dueDiligenceChecks: ["Identity Verification", "Address Confirmation", "Business Verification"]
         },
         scores: {
-          overall: scoringResult.scores.total,
-          quality: Math.round((scoringResult.scores.personal + scoringResult.scores.business) / 45 * 100),
-          completeness: Math.round(scoringResult.scores.total),
-          comprehensive: scoringResult.scores.total,
-          // Initial deterministic score; the async AI job below upgrades this to
-          // 'ai' when it succeeds (or leaves it 'rule-based' if AI is unavailable).
-          scoringMethod: 'rule-based',
-          comprehensiveBreakdown: scoringResult.breakdown
+          overall: Math.round(comprehensiveScore),
+          quality: Math.round((aiScores.personal + aiScores.business) / 45 * 100),
+          completeness: Math.round(comprehensiveScore),
+          comprehensive: comprehensiveScore,
+          scoringMethod: aiScores.aiError ? 'rule-based' : 'ai',
+          aiError: aiScores.aiError,
+          comprehensiveBreakdown,
         },
         decision: {
           status: draft.recommendation?.includes("POSITIVE") ? "Positive" : 
@@ -2836,72 +2878,6 @@ showpage
 
       // Mark corresponding MIS entry as completed with report date
       await markMisEntryCompleted(draft.leadId, today);
-
-      // Trigger AI scoring asynchronously (don't block response)
-      if (generatedPdfBuffer) {
-        const pdfForAi = generatedPdfBuffer;
-        (async () => {
-          try {
-            console.log(`[Auto AI Score] Starting AI scoring for report ${reportId}...`);
-            const { scoreComprehensiveWithAI, isAIConfigured } = await import("./ai-scoring");
-
-            if (!isAIConfigured()) {
-              console.log(`[Auto AI Score] AI not configured, skipping for ${reportId}`);
-              return;
-            }
-
-            // Decode PDF and extract text
-            const pdfBuffer = pdfForAi;
-            const pdfDoc = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
-            
-            let pdfText = '';
-            for (let i = 1; i <= pdfDoc.numPages; i++) {
-              const page = await pdfDoc.getPage(i);
-              const textContent = await page.getTextContent();
-              pdfText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
-            }
-
-            console.log(`[Auto AI Score] Extracted ${pdfText.length} characters, calling AI...`);
-            const aiScores = await scoreComprehensiveWithAI(pdfText, draft.leadId);
-
-            const aiComprehensive = aiScores.personal + aiScores.business + aiScores.banking + 
-                                   aiScores.networth + aiScores.existingDebt + aiScores.endUse + 
-                                   aiScores.referenceChecks;
-
-            const newScores = {
-              overall: Math.round((aiComprehensive + scoringResult.scores.total) / 2),
-              quality: Math.round((scoringResult.scores.personal + scoringResult.scores.business) / 45 * 100),
-              completeness: Math.round(scoringResult.scores.total),
-              comprehensive: aiComprehensive,
-              deterministicScore: scoringResult.scores.total,
-              scoringMethod: aiScores.aiError ? 'rule-based' : 'ai',
-              aiError: aiScores.aiError,
-              comprehensiveBreakdown: {
-                personal: aiScores.personal,
-                business: aiScores.business,
-                banking: aiScores.banking,
-                networth: aiScores.networth,
-                existingDebt: aiScores.existingDebt,
-                endUse: aiScores.endUse,
-                referenceChecks: aiScores.referenceChecks,
-                personalMatches: aiScores.personalMatches,
-                businessMatches: aiScores.businessMatches,
-                bankingMatches: aiScores.bankingMatches,
-                networthMatches: aiScores.networthMatches,
-                debtMatches: aiScores.debtMatches,
-                endUseMatches: aiScores.endUseMatches,
-                referenceMatches: aiScores.referenceMatches,
-                rationale: aiScores.rationale,
-              },
-            };
-
-            await storage.updateReportScores(reportId, newScores);
-            console.log(`[Auto AI Score] Report ${reportId} updated with AI score: ${aiComprehensive}`);
-          } catch (aiError) {
-            console.error(`[Auto AI Score] Failed for ${reportId}:`, aiError);
-          }
-        })();
-      }
 
       return res.json({ success: true, report });
 
@@ -3317,7 +3293,10 @@ showpage
       const currentScores = report.scores as any || {};
       const qualityScore = currentScores.quality || 75;
       const completenessScore = currentScores.completeness || 75;
-      const overallScore = Math.round((comprehensiveScore + qualityScore) / 2);
+      // Overall = the comprehensive rubric score (0-100). Quality is kept as a
+      // separate metric and no longer averaged in, so low reports aren't masked
+      // by the ~75 quality floor.
+      const overallScore = Math.round(comprehensiveScore);
 
       const newScores = {
         overall: overallScore,
@@ -3709,6 +3688,54 @@ showpage
     } catch (error) {
       console.error("Backfill PDFs to R2 error:", error);
       return res.status(500).json({ error: error instanceof Error ? error.message : "Backfill failed" });
+    }
+  });
+
+  // Reconcile stored report scores so the headline score matches the
+  // Comprehensive Score Breakdown. For each report we recompute
+  // comprehensive = sum of the breakdown sections and set overall = round(comprehensive).
+  // No AI calls — this only fixes legacy rows where overall was averaged with
+  // the quality floor (or comprehensive drifted from its section sum).
+  app.post("/api/admin/reconcile-report-scores", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Only admin can reconcile report scores" });
+      }
+
+      const reports = await storage.getAllReportsForArchive();
+      let updated = 0;
+      let skipped = 0;
+
+      for (const report of reports) {
+        const scores = (report.scores as any) || {};
+        const bd = scores.comprehensiveBreakdown;
+        if (!bd) { skipped++; continue; }
+
+        const sectionTotal =
+          (bd.personal ?? 0) + (bd.business ?? 0) + (bd.banking ?? 0) +
+          (bd.networth ?? 0) + (bd.existingDebt ?? 0) + (bd.endUse ?? 0) +
+          (bd.referenceChecks ?? 0);
+        const comprehensive = Math.round(sectionTotal * 100) / 100;
+        const overall = Math.round(comprehensive);
+
+        if (scores.comprehensive === comprehensive && scores.overall === overall) {
+          skipped++;
+          continue;
+        }
+
+        await storage.updateReportScores(report.id, {
+          ...scores,
+          comprehensive,
+          overall,
+        });
+        updated++;
+      }
+
+      console.log(`[Reconcile Scores] Updated ${updated}, skipped ${skipped} of ${reports.length} reports`);
+      return res.json({ success: true, total: reports.length, updated, skipped });
+    } catch (error) {
+      console.error("Reconcile report scores error:", error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Reconcile failed" });
     }
   });
 
