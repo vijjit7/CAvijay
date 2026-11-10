@@ -214,6 +214,101 @@ export async function searchTriggerEmail(leadId: string): Promise<TriggerEmailIn
   }
 }
 
+// A received email whose subject signals that a case/PD should be cancelled
+// (e.g. "Cancel the case", "Customer withdrawn"). The full text (subject + body)
+// is returned so the caller can match it against known Lead IDs.
+export interface CancellationEmail {
+  subject: string;
+  from: string;
+  text: string;
+  date: Date;
+}
+
+// Subject phrases that mark an email as a cancellation request. Matched
+// case-insensitively against the subject. Kept in sync with the Gmail query in
+// fetchCancellationEmails below.
+export const CANCELLATION_SUBJECT_PATTERNS: RegExp[] = [
+  /cancel\s+the\s+case/i,
+  /cancel\s+the\s+pd/i,
+  /customer\s+withdrawn/i,
+  /cancel\s+the\s+lead\s*id/i,
+  /cancel\s+with\s+lead\s*id/i,
+];
+
+export function isCancellationSubject(subject: string): boolean {
+  return CANCELLATION_SUBJECT_PATTERNS.some((re) => re.test(subject || ""));
+}
+
+// Read recent cancellation emails from Gmail. Mirrors importWorkAllocationEmails'
+// paging/body-extraction but filters on the cancellation subject phrases. Returns
+// an empty array (never throws) when Gmail is unreachable so the caller stays safe.
+export async function fetchCancellationEmails(daysBack: number = 7): Promise<CancellationEmail[]> {
+  try {
+    const gmail = await getGmailClient();
+
+    const afterDate = new Date();
+    afterDate.setDate(afterDate.getDate() - daysBack);
+    const afterDateStr = afterDate.toISOString().split('T')[0].replace(/-/g, '/');
+
+    // OR together the cancellation subject phrases. Gmail's subject: match is a
+    // loose phrase match; we re-check precisely with isCancellationSubject below.
+    const subjectQuery = [
+      'subject:"cancel the case"',
+      'subject:"cancel the pd"',
+      'subject:"customer withdrawn"',
+      'subject:"cancel the lead id"',
+      'subject:"cancel with lead id"',
+    ].join(' OR ');
+    const query = `after:${afterDateStr} (${subjectQuery})`;
+    console.log(`[Gmail] Cancellation scan query: ${query}`);
+
+    const messages: { id?: string | null }[] = [];
+    let pageToken: string | undefined = undefined;
+    do {
+      const listParams: { userId: string; q: string; maxResults: number; pageToken?: string } = {
+        userId: 'me', q: query, maxResults: 200,
+      };
+      if (pageToken) listParams.pageToken = pageToken;
+      const response = await gmail.users.messages.list(listParams);
+      if (response.data.messages) messages.push(...response.data.messages);
+      pageToken = response.data.nextPageToken || undefined;
+    } while (pageToken && messages.length < 1000);
+
+    if (messages.length === 0) return [];
+
+    const out: CancellationEmail[] = [];
+    for (const message of messages) {
+      if (!message.id) continue;
+      try {
+        const msgDetails = await gmail.users.messages.get({ userId: 'me', id: message.id, format: 'full' });
+        const headers = msgDetails.data.payload?.headers || [];
+        const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
+        // Re-check the subject precisely — Gmail's phrase match can be fuzzy.
+        if (!isCancellationSubject(subject)) continue;
+
+        const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
+        const internalMs = msgDetails.data.internalDate ? parseInt(msgDetails.data.internalDate, 10) : Date.now();
+
+        let body = '';
+        const payload = msgDetails.data.payload;
+        if (payload?.body?.data) {
+          body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+        } else if (payload?.parts) {
+          body = extractBodyFromParts(payload.parts, false);
+        }
+
+        out.push({ subject, from, text: `${subject}\n${body}`, date: new Date(internalMs) });
+      } catch (msgErr) {
+        console.error(`[Gmail] Error reading cancellation message ${message.id}:`, msgErr);
+      }
+    }
+    return out;
+  } catch (error: any) {
+    console.error('[Gmail] fetchCancellationEmails failed:', error?.message || error);
+    return [];
+  }
+}
+
 export interface WorkAllocationEntry {
   product: string | null;
   businessName: string | null;

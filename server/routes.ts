@@ -4731,6 +4731,23 @@ showpage
     }
   });
 
+  // Manual trigger for the cancellation sweep (also runs on the auto-import tick).
+  // Scans recent cancellation emails and drops matching cases out of the intray.
+  app.post("/api/mis/scan-cancellations", async (req, res) => {
+    try {
+      if (req.session?.userId !== 'ADMIN') {
+        return res.status(403).json({ error: "Only admin can run the cancellation scan" });
+      }
+      const { daysBack = 7 } = req.body || {};
+      const { scanAndCancelFromEmails } = await import("./mis-cancel-scan");
+      const summary = await scanAndCancelFromEmails({ daysBack });
+      return res.json(summary);
+    } catch (error: any) {
+      console.error("Cancellation scan error:", error);
+      return res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
   // ────────────────────────── Office Costing (Bills / Expenses) ──────────────────────────
   const APPROVER_IDS = new Set(['ADMIN', 'PROP']);
   const isApproverId = (id: string | undefined | null) => !!id && APPROVER_IDS.has(id);

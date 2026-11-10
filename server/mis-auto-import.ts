@@ -240,6 +240,18 @@ async function runOnce(): Promise<void> {
       `[MIS Auto-Import] ${summary.added} added, ${summary.updated} updated, ${summary.skipped} skipped, ` +
         `from ${summary.emailCount} emails`,
     );
+
+    // Same tick: sweep for cancellation emails and drop matching cases out of the intray.
+    try {
+      const { scanAndCancelFromEmails } = await import("./mis-cancel-scan");
+      const cancelSummary = await scanAndCancelFromEmails({ daysBack });
+      console.log(
+        `[MIS Cancel] ${cancelSummary.cancelled} cancelled, ${cancelSummary.notified} alerts sent, ` +
+          `from ${cancelSummary.emailCount} cancellation emails`,
+      );
+    } catch (cancelErr: any) {
+      console.error("[MIS Cancel] Sweep failed:", cancelErr?.message || cancelErr);
+    }
   } catch (err: any) {
     console.error("[MIS Auto-Import] Run failed:", err?.message || err);
   } finally {

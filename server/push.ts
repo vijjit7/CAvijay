@@ -155,3 +155,78 @@ export async function notifyAssociateNewWork(associateId: string, entries: MisEn
     pruned: results.filter((r) => r.pruned).length,
   };
 }
+
+/**
+ * Alert an associate that a case in their intray has been cancelled. Fires the same
+ * full-screen alarm (beep + buzz) as a new allocation — on native Android we reuse the
+ * FCM `type:"new-work"` data message (the only type AlarmMessagingService rings on) so
+ * no app change is needed; only the title/body differ. Web Push devices get a matching
+ * "Case cancelled" notification. Never throws — failures are logged, not propagated.
+ */
+export async function notifyAssociateCancelled(associateId: string, entries: MisEntry[]): Promise<NotifyResult> {
+  const empty: NotifyResult = { devices: 0, sent: 0, pruned: 0 };
+  if (entries.length === 0) return empty;
+
+  let subs: PushSubscription[];
+  try {
+    subs = await storage.getPushSubscriptionsByAssociate(associateId);
+  } catch (err) {
+    console.error("[Push] Failed to load subscriptions:", err);
+    return empty;
+  }
+  if (subs.length === 0) return empty;
+
+  const count = entries.length;
+  const first = entries[0];
+  const title = count === 1 ? "Case cancelled" : `${count} cases cancelled`;
+  const headline =
+    count === 1
+      ? [first.customerName, first.leadId ? `Lead ${first.leadId}` : null].filter(Boolean).join(" · ")
+      : `${count} cases were cancelled and removed from your intray`;
+  const body =
+    count === 1 ? `${headline}\nThis case has been cancelled and removed from your intray.` : headline;
+
+  const results = await Promise.all(
+    subs.map(async (sub): Promise<{ sent: boolean; pruned: boolean }> => {
+      // Native Android device → FCM data message (drives the full-screen alarm).
+      if (sub.platform === "android") {
+        const { sent, invalidToken } = await sendNewWorkMessage(sub.endpoint, { title, body });
+        if (invalidToken) {
+          await storage.deletePushSubscription(sub.endpoint).catch(() => {});
+          return { sent: false, pruned: true };
+        }
+        return { sent, pruned: false };
+      }
+
+      // Browser / PWA → Web Push (VAPID). Skipped if VAPID isn't configured.
+      if (!configured) return { sent: false, pruned: false };
+      const payload = JSON.stringify({
+        title,
+        body,
+        url: "/mis",
+        tag: "mis-cancelled",
+      });
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+        );
+        return { sent: true, pruned: false };
+      } catch (err: any) {
+        const status = err?.statusCode;
+        if (status === 404 || status === 410) {
+          await storage.deletePushSubscription(sub.endpoint).catch(() => {});
+          return { sent: false, pruned: true };
+        }
+        console.error("[Push] sendNotification (cancelled) failed:", status, err?.body || err?.message || err);
+        return { sent: false, pruned: false };
+      }
+    }),
+  );
+
+  return {
+    devices: subs.length,
+    sent: results.filter((r) => r.sent).length,
+    pruned: results.filter((r) => r.pruned).length,
+  };
+}
