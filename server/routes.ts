@@ -4390,6 +4390,86 @@ showpage
     }
   });
 
+  // Manual PD: the associate attaches a prepared PD report (PDF or Word) which is
+  // emailed to the initiator as a reply on the same initiation mail trail, with a
+  // "Regards, <associate> <phone>" signature.
+  app.post("/api/mis/:id/manual-pd", upload.single('file'), async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(401).json({ error: "Not authenticated" });
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid ID provided" });
+
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "A PD report file (PDF or Word) is required" });
+      const allowedTypes = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ];
+      if (!allowedTypes.includes(file.mimetype)) {
+        return res.status(400).json({ error: "Only PDF or Word (.doc/.docx) files are allowed" });
+      }
+
+      const entries = await storage.getMisEntries();
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return res.status(404).json({ error: "MIS entry not found" });
+
+      const isAdmin = userId === "ADMIN";
+      const isAssigned = entry.pdPersonId === userId || entry.associateId === userId;
+      if (!isAdmin && !isAssigned) {
+        return res.status(403).json({ error: "You can only send a manual PD for cases assigned to you" });
+      }
+
+      // Recipient: explicit override, else the stored initiator email.
+      const recipient =
+        (typeof req.body?.to === "string" && req.body.to.trim()) || entry.initiatedPersonEmail || "";
+      if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+        return res.status(400).json({
+          error: "No valid initiator email found for this case. Enter a recipient and try again.",
+        });
+      }
+
+      // Signature: the associate handling the case (prefer the assigned PD person).
+      const signer =
+        (entry.pdPersonId ? await storage.getUserById(entry.pdPersonId) : null) ||
+        (await storage.getUserById(userId));
+      const signature = ["Regards"];
+      if (signer?.name) signature.push(signer.name);
+      if (signer?.mobileNumber) signature.push(signer.mobileNumber);
+
+      const body = [
+        "Dear Sir,",
+        "",
+        `Please find attached the PD report for ${entry.customerName || "the customer"} (Lead ID: ${entry.leadId}).`,
+        "",
+        ...signature,
+      ].join("\r\n");
+
+      const { sendReplyWithAttachment } = await import("./gmail");
+      const result = await sendReplyWithAttachment({
+        leadId: entry.leadId,
+        to: recipient,
+        body,
+        attachment: {
+          filename: file.originalname || `PD-${entry.leadId}.pdf`,
+          mimeType: file.mimetype,
+          content: file.buffer,
+        },
+        subjectFallback: `PD Report - ${entry.leadId}${entry.customerName ? ` (${entry.customerName})` : ""}`,
+      });
+
+      // Remember the initiator email for next time.
+      await storage.updateMisEntry(id, { initiatedPersonEmail: recipient });
+
+      return res.json({ success: true, threaded: result.threaded, to: recipient, subject: result.subject });
+    } catch (error: any) {
+      console.error("Manual PD send error:", error);
+      return res.status(500).json({ error: error.message || "Failed to send manual PD" });
+    }
+  });
+
   // Admin: manually fire the "new work" push for a single case to the allocated
   // associate's devices. Useful for testing the PWA and for re-alerting an associate.
   app.post("/api/mis/:id/send-push", async (req, res) => {

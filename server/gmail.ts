@@ -139,6 +139,125 @@ export async function sendMail(opts: { to: string; subject: string; body: string
   });
 }
 
+// Locate the initiation email for a Lead ID so a reply can be threaded onto it.
+// Prefers the canonical "New PD Assigned" mail, falling back to any mail mentioning
+// the Lead ID. Returns the Gmail threadId plus the RFC Message-ID header (for the
+// In-Reply-To / References headers) and the original subject. null when nothing is
+// found or Gmail is unreachable (caller then sends a standalone mail).
+export async function findInitiationThread(
+  leadId: string,
+): Promise<{ threadId: string; messageIdHeader: string | null; subject: string } | null> {
+  try {
+    const gmail = await getGmailClient();
+    const queries = [`subject:"New PD Assigned" ${leadId}`, `${leadId}`];
+    for (const q of queries) {
+      const list = await gmail.users.messages.list({ userId: 'me', q, maxResults: 10 });
+      const msgs = list.data.messages || [];
+      if (msgs.length === 0 || !msgs[0].id) continue;
+      const msg = await gmail.users.messages.get({
+        userId: 'me',
+        id: msgs[0].id,
+        format: 'metadata',
+        metadataHeaders: ['Subject', 'Message-ID', 'Message-Id'],
+      });
+      const headers = msg.data.payload?.headers || [];
+      const header = (name: string) =>
+        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || null;
+      return {
+        threadId: msg.data.threadId || '',
+        messageIdHeader: header('Message-ID') || header('Message-Id'),
+        subject: header('Subject') || '',
+      };
+    }
+    return null;
+  } catch (error: any) {
+    console.error('[Gmail] findInitiationThread failed:', error?.message || error);
+    return null;
+  }
+}
+
+// Send an email carrying a single file attachment, threaded as a reply onto the Lead
+// ID's initiation email when that email can be found (so it lands on the same mail
+// trail the initiator started). Falls back to a standalone mail with subjectFallback
+// when no initiation email exists. Returns whether it was threaded and the subject used.
+export async function sendReplyWithAttachment(opts: {
+  leadId: string;
+  to: string;
+  body: string;
+  attachment: { filename: string; mimeType: string; content: Buffer };
+  from?: string;
+  subjectFallback?: string;
+}): Promise<{ threaded: boolean; subject: string }> {
+  const gmail = await getGmailClient();
+
+  let from = opts.from;
+  if (!from) {
+    try {
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      from = profile.data.emailAddress || 'me';
+    } catch {
+      from = 'me';
+    }
+  }
+
+  let threadId: string | undefined;
+  let inReplyTo: string | null = null;
+  let subject = opts.subjectFallback || `PD Report - ${opts.leadId}`;
+  const info = await findInitiationThread(opts.leadId);
+  if (info) {
+    threadId = info.threadId || undefined;
+    inReplyTo = info.messageIdHeader;
+    if (info.subject) {
+      subject = /^re:/i.test(info.subject.trim()) ? info.subject : `Re: ${info.subject}`;
+    }
+  }
+
+  // Sanitise the filename for the header (no quotes/CR/LF).
+  const safeName = (opts.attachment.filename || `PD-${opts.leadId}`).replace(/["\r\n]/g, '_');
+  // Base64-encode the attachment, wrapped at 76 chars per MIME conventions.
+  const attB64 = opts.attachment.content.toString('base64').replace(/(.{76})/g, '$1\r\n');
+
+  const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const headerLines = [
+    `To: ${opts.to}`,
+    `From: ${from}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+  ];
+  if (inReplyTo) {
+    headerLines.push(`In-Reply-To: ${inReplyTo}`);
+    headerLines.push(`References: ${inReplyTo}`);
+  }
+  headerLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const mime = [
+    headerLines.join('\r\n'),
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    opts.body,
+    '',
+    `--${boundary}`,
+    `Content-Type: ${opts.attachment.mimeType}; name="${safeName}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${safeName}"`,
+    '',
+    attB64,
+    '',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  const raw = Buffer.from(mime).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const requestBody: { raw: string; threadId?: string } = { raw };
+  if (threadId) requestBody.threadId = threadId;
+
+  await gmail.users.messages.send({ userId: 'me', requestBody });
+  return { threaded: !!threadId, subject };
+}
+
 export async function searchTriggerEmail(leadId: string): Promise<TriggerEmailInfo | null> {
   try {
     console.log(`Searching Gmail for Lead ID: ${leadId}`);

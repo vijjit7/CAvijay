@@ -58,6 +58,7 @@ type MisEntry = {
   inDate: string | null;
   outDate: string | null;
   initiatedPerson: string | null;
+  initiatedPersonEmail?: string | null;
   product: string | null;
   pdPerson: string | null;
   pdTyping: string | null;
@@ -99,6 +100,10 @@ export default function MisPage() {
   const [notifyReason, setNotifyReason] = useState("Customer Not Available");
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifyApptDate, setNotifyApptDate] = useState<string | null>(null);
+  // Manual PD: attach a prepared PD report and email it as a reply to the initiator.
+  const [manualPdOpen, setManualPdOpen] = useState(false);
+  const [manualPdEmail, setManualPdEmail] = useState("");
+  const [manualPdFile, setManualPdFile] = useState<File | null>(null);
   const [manualEntryDialogOpen, setManualEntryDialogOpen] = useState(false);
   const [manualEntry, setManualEntry] = useState({
     leadId: "",
@@ -357,6 +362,33 @@ export default function MisPage() {
     },
   });
 
+  const manualPdMutation = useMutation({
+    mutationFn: async ({ id, file, to }: { id: number; file: File; to: string }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (to) formData.append("to", to);
+      const res = await fetch(`/api/mis/${id}/manual-pd`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to send manual PD (${res.status})`);
+      }
+      return res.json() as Promise<{ threaded: boolean; to: string; subject: string }>;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Manual PD sent",
+        description: data.threaded
+          ? `Replied on the initiation email to ${data.to}.`
+          : `Emailed to ${data.to} (no initiation email found to reply on).`,
+      });
+      setManualPdOpen(false);
+      setManualPdFile(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not send", description: error.message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/mis/${id}`, { method: "DELETE" });
@@ -545,6 +577,10 @@ export default function MisPage() {
     setNotifyApptDate((entry as any).appointmentDate || null);
     setNotifyReason((entry as any).availabilityNote || "Customer Not Available");
     setNotifyOpen(false);
+    // Seed the manual-PD recipient from the stored initiator email.
+    setManualPdEmail(entry.initiatedPersonEmail || "");
+    setManualPdFile(null);
+    setManualPdOpen(false);
     setEditDialogOpen(true);
   };
 
@@ -1751,13 +1787,67 @@ export default function MisPage() {
                 </div>
               </div>
             )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditDialogOpen(false)} data-testid="button-cancel-edit">
-                Cancel
-              </Button>
-              <Button onClick={handleEditSave} disabled={updateMutation.isPending} data-testid="button-save-edit">
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
-              </Button>
+            <DialogFooter className="sm:justify-between">
+              {/* Manual PD: attach a prepared PD report and email it to the initiator
+                  as a reply on the original initiation mail. */}
+              <Popover open={manualPdOpen} onOpenChange={setManualPdOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="text-blue-700 border-blue-300 hover:bg-blue-50"
+                    data-testid="button-manual-pd"
+                  >
+                    Manual PD
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-4 space-y-3" align="start">
+                  <div className="text-sm font-semibold text-slate-800">Manual PD</div>
+                  <p className="text-xs text-slate-500 -mt-2">
+                    Attach a PDF or Word PD report. It is emailed to the initiator as a reply on the
+                    original initiation mail, signed off with your name and phone number.
+                  </p>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">PD report (PDF or Word)</label>
+                    <Input
+                      type="file"
+                      accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      onChange={(e) => setManualPdFile(e.target.files?.[0] || null)}
+                      data-testid="input-manual-pd-file"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Send to (initiator)</label>
+                    <Input
+                      type="email"
+                      value={manualPdEmail}
+                      onChange={(e) => setManualPdEmail(e.target.value)}
+                      placeholder="name@company.com"
+                      data-testid="input-manual-pd-email"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    disabled={manualPdMutation.isPending || !manualPdFile || !manualPdEmail.trim()}
+                    onClick={() => {
+                      if (!editEntry || !manualPdFile) return;
+                      manualPdMutation.mutate({ id: editEntry.id, file: manualPdFile, to: manualPdEmail.trim() });
+                    }}
+                    data-testid="button-send-manual-pd"
+                  >
+                    {manualPdMutation.isPending ? "Sending..." : "Attach & Send"}
+                  </Button>
+                </PopoverContent>
+              </Popover>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)} data-testid="button-cancel-edit">
+                  Cancel
+                </Button>
+                <Button onClick={handleEditSave} disabled={updateMutation.isPending} data-testid="button-save-edit">
+                  {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
