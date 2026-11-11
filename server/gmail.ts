@@ -343,6 +343,10 @@ export interface CancellationEmail {
   date: Date;
 }
 
+// "Ignore this/the PD" — honoured in both the subject and the body (see
+// isCancellationEmail). Defined separately so both call sites share one regex.
+const IGNORE_PD_PATTERN = /ignore\s+(?:this|the)\s+pd/i;
+
 // Subject phrases that mark an email as a cancellation request. Matched
 // case-insensitively against the subject. Kept in sync with the Gmail query in
 // fetchCancellationEmails below.
@@ -353,11 +357,18 @@ export const CANCELLATION_SUBJECT_PATTERNS: RegExp[] = [
   /cancel\s+the\s+lead\s*id/i,
   /cancel\s+with\s+lead\s*id/i,
   // "Ignore this/the PD" is phrased differently but means the same thing: drop the case.
-  /ignore\s+(?:this|the)\s+pd/i,
+  IGNORE_PD_PATTERN,
 ];
 
 export function isCancellationSubject(subject: string): boolean {
   return CANCELLATION_SUBJECT_PATTERNS.some((re) => re.test(subject || ""));
+}
+
+// "Ignore this/the PD" is the one phrase we also honour when it appears in the
+// email body (not just the subject) — people often write it inline in a reply.
+// The other phrases stay subject-only to avoid false positives from quoted text.
+export function isCancellationEmail(subject: string, body: string): boolean {
+  return isCancellationSubject(subject) || IGNORE_PD_PATTERN.test(body || "");
 }
 
 // Read recent cancellation emails from Gmail. Mirrors importWorkAllocationEmails'
@@ -371,16 +382,17 @@ export async function fetchCancellationEmails(daysBack: number = 7): Promise<Can
     afterDate.setDate(afterDate.getDate() - daysBack);
     const afterDateStr = afterDate.toISOString().split('T')[0].replace(/-/g, '/');
 
-    // OR together the cancellation subject phrases. Gmail's subject: match is a
-    // loose phrase match; we re-check precisely with isCancellationSubject below.
+    // OR together the cancellation phrases. Gmail's phrase match is loose; we
+    // re-check precisely with isCancellationEmail below. The "ignore ... pd"
+    // terms are unqualified (no subject:) so Gmail also matches them in the body.
     const subjectQuery = [
       'subject:"cancel the case"',
       'subject:"cancel the pd"',
       'subject:"customer withdrawn"',
       'subject:"cancel the lead id"',
       'subject:"cancel with lead id"',
-      'subject:"ignore this pd"',
-      'subject:"ignore the pd"',
+      '"ignore this pd"',
+      '"ignore the pd"',
     ].join(' OR ');
     const query = `after:${afterDateStr} (${subjectQuery})`;
     console.log(`[Gmail] Cancellation scan query: ${query}`);
@@ -406,11 +418,6 @@ export async function fetchCancellationEmails(daysBack: number = 7): Promise<Can
         const msgDetails = await gmail.users.messages.get({ userId: 'me', id: message.id, format: 'full' });
         const headers = msgDetails.data.payload?.headers || [];
         const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
-        // Re-check the subject precisely — Gmail's phrase match can be fuzzy.
-        if (!isCancellationSubject(subject)) continue;
-
-        const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
-        const internalMs = msgDetails.data.internalDate ? parseInt(msgDetails.data.internalDate, 10) : Date.now();
 
         let body = '';
         const payload = msgDetails.data.payload;
@@ -419,6 +426,13 @@ export async function fetchCancellationEmails(daysBack: number = 7): Promise<Can
         } else if (payload?.parts) {
           body = extractBodyFromParts(payload.parts, false);
         }
+
+        // Re-check precisely — Gmail's phrase match can be fuzzy. Accepts a
+        // cancellation subject or an "ignore this/the PD" mention in the body.
+        if (!isCancellationEmail(subject, body)) continue;
+
+        const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
+        const internalMs = msgDetails.data.internalDate ? parseInt(msgDetails.data.internalDate, 10) : Date.now();
 
         out.push({ subject, from, text: `${subject}\n${body}`, date: new Date(internalMs) });
       } catch (msgErr) {

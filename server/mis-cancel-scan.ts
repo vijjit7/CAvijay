@@ -11,7 +11,7 @@
 // The sweep is idempotent: once a case is Cancelled (workflowStatus 'completed') it no
 // longer qualifies as "live", so re-running never double-processes or re-notifies.
 
-import { fetchCancellationEmails, isCancellationSubject } from "./gmail";
+import { fetchCancellationEmails, isCancellationEmail } from "./gmail";
 import { storage } from "./storage";
 import { notifyAssociateCancelled } from "./push";
 import type { MisEntry } from "@shared/schema";
@@ -57,7 +57,7 @@ export async function scanAndCancelFromEmails(opts: { daysBack?: number } = {}):
   // Pair each live case with the first cancellation email that references its Lead ID.
   const toCancel: { entry: MisEntry; email: (typeof emails)[number] }[] = [];
   for (const entry of liveEntries) {
-    const match = emails.find((e) => isCancellationSubject(e.subject) && textReferencesLead(e.text, entry.leadId));
+    const match = emails.find((e) => isCancellationEmail(e.subject, e.text) && textReferencesLead(e.text, entry.leadId));
     if (match) toCancel.push({ entry, email: match });
   }
 
