@@ -2,7 +2,8 @@
 //
 // Companion to mis-auto-import.ts. Where that pulls "New PD Assigned" emails into the
 // intray, this watches for cancellation emails — subjects like "Cancel the case",
-// "Cancel the PD", "Customer withdrawn", "Cancel the Lead ID", "Cancel with Lead ID".
+// "Cancel the PD", "Customer withdrawn", "Cancel the Lead ID", "Cancel with Lead ID",
+// or "Ignore this PD" (same intent, different wording).
 // For every live MIS case whose Lead ID is referenced by such an email we flip the case
 // to Cancelled, drop it out of the associate's intray, and fire a "Case cancelled" alert
 // (same beep/buzz as a new allocation) to the associate who was handling it.

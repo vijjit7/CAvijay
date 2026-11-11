@@ -352,6 +352,8 @@ export const CANCELLATION_SUBJECT_PATTERNS: RegExp[] = [
   /customer\s+withdrawn/i,
   /cancel\s+the\s+lead\s*id/i,
   /cancel\s+with\s+lead\s*id/i,
+  // "Ignore this/the PD" is phrased differently but means the same thing: drop the case.
+  /ignore\s+(?:this|the)\s+pd/i,
 ];
 
 export function isCancellationSubject(subject: string): boolean {
@@ -377,6 +379,8 @@ export async function fetchCancellationEmails(daysBack: number = 7): Promise<Can
       'subject:"customer withdrawn"',
       'subject:"cancel the lead id"',
       'subject:"cancel with lead id"',
+      'subject:"ignore this pd"',
+      'subject:"ignore the pd"',
     ].join(' OR ');
     const query = `after:${afterDateStr} (${subjectQuery})`;
     console.log(`[Gmail] Cancellation scan query: ${query}`);
